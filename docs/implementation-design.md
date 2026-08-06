@@ -87,8 +87,10 @@ default_health_path = "/health"
 | llama-server 路径 | 用于读取 `--help`、`--version`、`--list-devices` 和参数目录。 |
 | Profile/参数文件位置 | service 或 runner 实际读取的活动配置文件；用户自行保证 LlamaLens 可写、服务可读。 |
 | 模型目录 | 用户可添加多个目录；用于扫描和限制本地模型路径。 |
-| llama-server 地址与端口 | Benchmark 和健康检查访问的地址。 |
+| llama-server 地址与端口 | 自动生成 Profile 的 `--host`、`--port`，同时作为 Benchmark 和健康检查访问地址。 |
 | LlamaLens Web 地址与端口 | 默认 `127.0.0.1`；用户可改为 `0.0.0.0`。无认证时对 `0.0.0.0` 显示高风险警告。 |
+
+`llama_host`、`llama_port` 是启动与访问共享的单一配置来源。Profile 参数区不应重复配置 `--host`、`--port`，否则最终 argv 的后置值可能覆盖监听地址，但健康检查和 Benchmark 仍访问设置页地址。
 
 由于 V1 没有账户密码，默认必须监听 `127.0.0.1`。允许用户主动填写 `0.0.0.0`，但 UI 要明确提示：同一网络内任何能访问该端口的人都可能切换模型、重启服务、发起下载和运行 benchmark。V1 不阻止管理员这样配置，后续版本再增加登录、TLS 和角色权限。
 
@@ -182,7 +184,7 @@ Profile 的首页不是一段自由文本命令，也不要求用户把所有性
 ```text
 [llama_server_bin]
   + [--model, model_path]                 # 最小必填区
-  + installation_fixed_args               # 仅安装管理员可改，例如 host/port
+  + installation_fixed_args               # 设置页统一注入，例如 host/port
   + catalog_args                           # 用户从目录添加的参数，按列表顺序
   + shlex_split(custom_args_text by line) # 用户自定义参数，始终追加在最后
 ```

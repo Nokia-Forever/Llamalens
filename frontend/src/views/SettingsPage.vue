@@ -70,14 +70,14 @@ onMounted(load)
       </div>
     </PageSection>
 
-    <PageSection title="网络" description="Web 和 llama-server 地址分别配置。Web Host/Port 保存后需要重启 LlamaLens service 才会生效。">
+    <PageSection title="网络" description="Web Host/Port 是管理页面地址；llama-server Host/Port 会写入每个 Profile 的启动命令，并供健康检查和 Benchmark 使用。">
       <div class="form-grid four-columns">
-        <label class="field"><span>Web Host</span><input v-model="form.web_host" /></label>
-        <label class="field"><span>Web Port</span><input v-model.number="form.web_port" type="number" /></label>
-        <label class="field"><span>Llama Host</span><input v-model="form.llama_host" /></label>
-        <label class="field"><span>Llama Port</span><input v-model.number="form.llama_port" type="number" /></label>
-        <label class="field"><span>Health Path</span><input v-model="form.health_path" /></label>
-        <label class="field"><span>Request Path</span><input v-model="form.request_path" /></label>
+        <label class="field"><span>Web Host</span><input v-model="form.web_host" /><small>LlamaLens 管理页面的监听地址。</small></label>
+        <label class="field"><span>Web Port</span><input v-model.number="form.web_port" type="number" /><small>LlamaLens 管理页面的端口；保存后需重启 LlamaLens。</small></label>
+        <label class="field"><span>llama-server Host</span><input v-model="form.llama_host" /><small>同时作为 Profile 的 <code>--host</code> 和健康检查、Benchmark 目标主机；同机部署建议使用 <code>127.0.0.1</code>。</small></label>
+        <label class="field"><span>llama-server Port</span><input v-model.number="form.llama_port" type="number" /><small>自动生成 Profile 的 <code>--port</code>，也是健康检查和 Benchmark 的目标端口。</small></label>
+        <label class="field"><span>Health Path</span><input v-model="form.health_path" /><small>切换 Profile 后检查服务是否启动成功，默认 <code>/health</code>。</small></label>
+        <label class="field"><span>Request Path</span><input v-model="form.request_path" /><small>Benchmark 发送推理请求的接口，默认 <code>/completion</code>。</small></label>
       </div>
     </PageSection>
 

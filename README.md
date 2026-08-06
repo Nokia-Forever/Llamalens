@@ -62,7 +62,7 @@ Vite 会把 `/api` 代理到 `127.0.0.1:8000`。
 3. 由用户创建 llama.cpp service。可参考 [llama-server.service.example](deploy/llama-server.service.example)。
 4. 由用户创建 LlamaLens service。可参考 [llama-lens.service.example](deploy/llama-lens.service.example)。
 5. 如果 llama.cpp 使用系统级 service，手动配置只允许固定 unit 的 sudoers。可参考 [sudoers.example](deploy/sudoers.example)。
-6. 在 Web 设置页填写实际路径和端口，再从 Profiles 页面刷新本机参数目录。
+6. 在 Web 设置页填写实际路径和 llama-server 地址/端口，再从 Profiles 页面刷新本机参数目录。
 
 推荐的设置值：
 
@@ -73,7 +73,10 @@ Systemd 范围: system
 Active Profile: /var/lib/llama-lens/active-profile.json
 Web Host: 127.0.0.1
 Llama Host: 127.0.0.1
+Llama Port: 8080
 ```
+
+`Llama Host/Port` 有三项关联用途：自动加入每个 Profile 的最终启动命令（`--host`、`--port`）、切换 Profile 后执行健康检查、向同一地址发送 Benchmark 请求。因此一般不要再在 Profile 中重复添加 `--host` 或 `--port`，否则实际监听地址可能与健康检查、Benchmark 地址不一致。
 
 ### systemctl 是否需要 root
 

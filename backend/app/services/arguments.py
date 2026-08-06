@@ -15,25 +15,59 @@ from app.schemas import AppSettings, CatalogArgumentInput
 
 
 BUILTIN_ARGUMENTS: list[tuple[list[str], str, str, str]] = [
+    (["-h", "--help", "--usage"], "", "显示帮助后退出，不用于常驻服务", "diagnostics"),
+    (["-cl", "--cache-list"], "", "显示本地模型缓存清单后退出", "diagnostics"),
     (["-c", "--ctx-size"], "N", "上下文容量，0 表示读取模型元数据", "context"),
     (["-n", "--predict", "--n-predict"], "N", "服务默认最大输出 token 数", "context"),
     (["-b", "--batch-size"], "N", "逻辑最大 batch size，主要影响 Prefill", "performance"),
     (["-ub", "--ubatch-size"], "N", "物理 micro-batch size", "performance"),
     (["-t", "--threads"], "N", "生成阶段 CPU 线程数", "cpu"),
     (["-tb", "--threads-batch"], "N", "Prompt/batch 阶段 CPU 线程数", "cpu"),
+    (["-C", "--cpu-mask"], "MASK", "生成线程 CPU affinity mask", "cpu"),
+    (["-Cr", "--cpu-range"], "LO-HI", "生成线程 CPU 范围", "cpu"),
+    (["-Cb", "--cpu-mask-batch"], "MASK", "Prompt/batch 线程 CPU affinity mask", "cpu"),
+    (["-Crb", "--cpu-range-batch"], "LO-HI", "Prompt/batch 线程 CPU 范围", "cpu"),
+    (["-lcs", "--lookup-cache-static"], "PATH", "lookup decoding 静态缓存文件", "performance"),
+    (["-lcd", "--lookup-cache-dynamic"], "PATH", "lookup decoding 动态缓存文件", "performance"),
+    (["-ctxcp", "--ctx-checkpoints", "--swa-checkpoints"], "N", "每个 slot 的最大 context checkpoint 数", "context"),
+    (["-cms", "--checkpoint-min-step"], "N", "context checkpoint 的最小 token 间隔", "context"),
+    (["-cram", "--cache-ram"], "MIB", "RAM prompt cache 上限", "kv-cache"),
+    (["-kvu", "--kv-unified"], "", "所有序列使用统一 KV buffer", "kv-cache"),
     (["-ngl", "--gpu-layers", "--n-gpu-layers"], "N|auto|all", "放入显存的模型层数", "gpu"),
     (["-dev", "--device"], "DEVICES", "用于 offload 的设备列表", "gpu"),
     (["-sm", "--split-mode"], "none|layer|row|tensor", "多 GPU 切分模式", "gpu"),
     (["-ts", "--tensor-split"], "N0,N1,...", "各 GPU 的切分比例", "gpu"),
     (["-mg", "--main-gpu"], "INDEX", "主 GPU 序号", "gpu"),
+    (["-ot", "--override-tensor"], "PATTERN=TYPE", "覆盖匹配 tensor 的 buffer 类型", "gpu"),
+    (["-cmoe", "--cpu-moe"], "", "将全部 MoE 权重保留在 CPU", "cpu"),
+    (["-ncmoe", "--n-cpu-moe"], "N", "将前 N 层 MoE 权重保留在 CPU", "cpu"),
+    (["-fit", "--fit"], "", "自动适配设备可用内存", "gpu"),
+    (["-fitt", "--fit-target"], "N0,N1,...", "各设备自动适配时保留的内存目标", "gpu"),
+    (["-fitc", "--fit-ctx"], "N", "自动适配可设置的最小 context", "gpu"),
     (["-fa", "--flash-attn"], "on|off|auto", "Flash Attention 模式", "performance"),
     (["-kvo", "--kv-offload"], "", "启用 KV cache offload", "kv-cache"),
     (["-nkvo", "--no-kv-offload"], "", "禁用 KV cache offload", "kv-cache"),
+    (["-nr", "--no-repack"], "", "禁用权重 repack", "memory"),
     (["-ctk", "--cache-type-k"], "TYPE", "K cache 数据类型", "kv-cache"),
     (["-ctv", "--cache-type-v"], "TYPE", "V cache 数据类型", "kv-cache"),
+    (["-dt", "--defrag-thold"], "N", "KV cache 碎片整理阈值（已弃用）", "kv-cache"),
+    (["-dio", "--direct-io"], "", "使用 direct I/O（已弃用，优先使用 load-mode）", "memory"),
+    (["-ndio", "--no-direct-io"], "", "禁用 direct I/O（已弃用）", "memory"),
+    (["-lm", "--load-mode"], "MODE", "模型加载模式", "memory"),
     (["-np", "--parallel"], "N", "server slot / 并行序列数", "server"),
     (["-cb", "--cont-batching"], "", "启用连续 batching", "server"),
     (["-nocb", "--no-cont-batching"], "", "禁用连续 batching", "server"),
+    (["-p", "--prompt"], "TEXT", "服务默认 prompt", "sampling"),
+    (["-f", "--file"], "PATH", "从文本文件读取默认 prompt", "sampling"),
+    (["-bf", "--binary-file"], "PATH", "从二进制文件读取默认 prompt", "sampling"),
+    (["-e", "--escape"], "", "处理 prompt 中的转义序列", "sampling"),
+    (["-r", "--reverse-prompt"], "TEXT", "反向提示/停止文本", "sampling"),
+    (["-sp", "--special"], "", "在输出中显示 special token", "sampling"),
+    (["-s", "--seed"], "N", "随机种子", "sampling"),
+    (["-l", "--logit-bias"], "TOKEN(+/-)BIAS", "修改指定 token 的 logits", "sampling"),
+    (["-j", "--json-schema"], "SCHEMA", "使用 JSON Schema 约束输出", "sampling"),
+    (["-jf", "--json-schema-file"], "PATH", "从文件读取 JSON Schema", "sampling"),
+    (["-bs", "--backend-sampling"], "", "启用实验性后端采样", "sampling"),
     (["--cache-prompt"], "", "启用 Prompt cache", "kv-cache"),
     (["--no-cache-prompt"], "", "禁用 Prompt cache", "kv-cache"),
     (["--cache-reuse"], "N", "Prompt cache 最小复用块", "kv-cache"),
@@ -42,15 +76,26 @@ BUILTIN_ARGUMENTS: list[tuple[list[str], str, str, str]] = [
     (["--perf"], "", "启用 libllama 性能计时", "diagnostics"),
     (["--warmup"], "", "服务启动时预热", "performance"),
     (["--no-warmup"], "", "关闭启动预热", "performance"),
+    (["-a", "--alias"], "NAME", "API 返回和路由使用的模型别名", "model"),
+    (["-m", "--model"], "PATH", "本地 GGUF 模型文件", "model"),
+    (["-mu", "--model-url"], "URL", "从 URL 获取模型", "model"),
+    (["-dr", "--docker-repo"], "REPO", "Docker Hub 模型标识", "model"),
+    (["-hf", "-hfr", "--hf-repo"], "REPO[:QUANT]", "Hugging Face 模型仓库", "model"),
+    (["-hff", "--hf-file"], "FILE", "Hugging Face 仓库中的模型文件", "model"),
+    (["-hft", "--hf-token"], "TOKEN", "Hugging Face 访问令牌", "security"),
     (["--host"], "HOST", "监听地址", "server"),
     (["--port"], "PORT", "监听端口", "server"),
+    (["-to", "--timeout"], "SECONDS", "HTTP 读写超时", "server"),
+    (["-ag", "--agent"], "", "启用实验性 agent 模式", "server"),
+    (["-no-ag", "--no-agent"], "", "禁用实验性 agent 模式", "server"),
     (["--api-key"], "KEYS", "API key，支持逗号分隔", "security"),
     (["--api-key-file"], "PATH", "API key 文件", "security"),
     (["--jinja"], "", "启用 Jinja chat template", "chat"),
     (["--chat-template"], "TEMPLATE", "自定义 chat template", "chat"),
     (["--chat-template-file"], "PATH", "自定义 chat template 文件", "chat"),
-    (["--reasoning"], "on|off|auto", "Reasoning 模式", "chat"),
+    (["-rea", "--reasoning"], "on|off|auto", "Reasoning 模式", "chat"),
     (["--reasoning-format"], "FORMAT", "Reasoning 返回格式", "chat"),
+    (["-sps", "--slot-prompt-similarity"], "N", "请求 prompt 与已有 slot 的相似度阈值", "server"),
     (["--lora"], "PATHS", "加载一个或多个 LoRA", "adapters"),
     (["--lora-scaled"], "PATH:SCALE", "加载带缩放 LoRA", "adapters"),
     (["--mmproj-auto"], "", "自动使用多模态 projector", "multimodal"),
@@ -63,28 +108,43 @@ BUILTIN_ARGUMENTS: list[tuple[list[str], str, str, str]] = [
     (["--check-tensors"], "", "加载时检查 tensor", "diagnostics"),
     (["--log-file"], "PATH", "日志文件", "logging"),
     (["--log-timestamps"], "", "日志添加时间戳", "logging"),
-    (["--verbosity", "--log-verbosity"], "N", "日志级别 0-5", "logging"),
-    (["--spec-draft-model", "--model-draft"], "PATH", "推测解码 draft 模型", "speculative"),
+    (["-v", "--verbose", "--log-verbose"], "", "启用详细日志", "logging"),
+    (["-lv", "--verbosity", "--log-verbosity"], "N", "日志级别 0-5", "logging"),
+    (["-hfd", "-hfrd", "--spec-draft-hf", "--hf-repo-draft"], "REPO[:QUANT]", "Draft 模型的 Hugging Face 仓库", "speculative"),
+    (["-md", "--spec-draft-model", "--model-draft"], "PATH", "推测解码 draft 模型", "speculative"),
+    (["-td", "--spec-draft-threads", "--threads-draft"], "N", "Draft 生成阶段 CPU 线程数", "speculative"),
+    (["-tbd", "--spec-draft-threads-batch", "--threads-batch-draft"], "N", "Draft batch 阶段 CPU 线程数", "speculative"),
+    (["-Cd", "--spec-draft-cpu-mask", "--cpu-mask-draft"], "MASK", "Draft 生成线程 CPU affinity mask", "speculative"),
+    (["-Crd", "--spec-draft-cpu-range", "--cpu-range-draft"], "LO-HI", "Draft 生成线程 CPU 范围", "speculative"),
+    (["-Cbd", "--spec-draft-cpu-mask-batch", "--cpu-mask-batch-draft"], "MASK", "Draft batch 线程 CPU affinity mask", "speculative"),
+    (["-ctkd", "--spec-draft-type-k", "--cache-type-k-draft"], "TYPE", "Draft 模型 K cache 数据类型", "speculative"),
+    (["-ctvd", "--spec-draft-type-v", "--cache-type-v-draft"], "TYPE", "Draft 模型 V cache 数据类型", "speculative"),
+    (["-otd", "--spec-draft-override-tensor", "--override-tensor-draft"], "PATTERN=TYPE", "覆盖 Draft tensor 的 buffer 类型", "speculative"),
+    (["-cmoed", "--spec-draft-cpu-moe", "--cpu-moe-draft"], "", "将 Draft MoE 权重保留在 CPU", "speculative"),
+    (["-ncmoed", "--spec-draft-n-cpu-moe", "--spec-draft-ncmoe", "--n-cpu-moe-draft"], "N", "将 Draft 前 N 层 MoE 权重保留在 CPU", "speculative"),
+    (["-devd", "--spec-draft-device", "--device-draft"], "DEVICES", "Draft 模型 offload 设备列表", "speculative"),
+    (["-ngld", "--spec-draft-ngl", "--gpu-layers-draft", "--n-gpu-layers-draft"], "N|auto|all", "Draft 模型放入显存的层数", "speculative"),
     (["--spec-draft-n-max"], "N", "每轮最大 draft token", "speculative"),
     (["--spec-draft-p-min"], "P", "最小推测接受概率", "speculative"),
 ]
 
 
 def seed_builtin_catalog(db: Session) -> None:
-    if db.scalar(select(ArgumentCatalog.id).limit(1)) is not None:
-        return
+    existing = {row.key: row for row in db.scalars(select(ArgumentCatalog)).all()}
     for aliases, hint, description, category in BUILTIN_ARGUMENTS:
-        db.add(
-            ArgumentCatalog(
-                key=aliases[-1],
-                aliases_json=json.dumps(aliases),
-                value_hint=hint,
-                description=description,
-                category=category,
-                source="builtin",
-                supported=True,
-            )
-        )
+        key = aliases[-1]
+        row = existing.get(key)
+        if row is None:
+            row = ArgumentCatalog(key=key, source="builtin")
+            db.add(row)
+            existing[key] = row
+        if row.source != "builtin":
+            continue
+        row.aliases_json = json.dumps(aliases)
+        row.value_hint = hint
+        row.description = description
+        row.category = category
+        row.supported = True
     db.commit()
 
 

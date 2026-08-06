@@ -60,6 +60,12 @@ function addArgument(item: CatalogArgument) {
   const flag = item.aliases.find((alias) => alias.startsWith('--')) || item.key
   form.catalog_args.push({ flag, value: '' })
 }
+function argumentAliases(item: CatalogArgument) {
+  return item.aliases.length ? item.aliases : [item.key]
+}
+function isShortAlias(alias: string) {
+  return alias.startsWith('-') && !alias.startsWith('--')
+}
 function removeArgument(index: number) { form.catalog_args.splice(index, 1) }
 async function save() {
   saving.value = true
@@ -137,7 +143,7 @@ onMounted(load)
         </div>
       </PageSection>
 
-      <PageSection title="已选参数" description="参数按这里的顺序进入最终 argv。">
+      <PageSection title="已选参数" description="参数按这里的顺序进入最终 argv。--host 和 --port 已由设置页自动加入，一般不要在这里重复配置。">
         <div v-if="duplicateFlags.length" class="risk-banner">检测到重复参数: {{ duplicateFlags.join(', ') }}。不会阻止保存，后出现的值排在 argv 后面。</div>
         <div v-if="!form.catalog_args.length" class="empty-state compact">从右侧参数目录添加，或者直接使用下方自定义参数。</div>
         <div class="selected-args">
@@ -155,7 +161,17 @@ onMounted(load)
           <label class="search-box full"><IconSearch :size="17" /><input v-model="search" placeholder="搜索 parallel、batch、GPU 或 flag" /></label>
           <div class="argument-catalog">
             <button v-for="item in filteredCatalog" :key="item.id" type="button" class="catalog-row" @click="addArgument(item)">
-              <span><code>{{ item.key }}</code><small>{{ item.description || item.value_hint }}</small></span><em>{{ item.category }}</em>
+              <span>
+                <span class="catalog-aliases">
+                  <code
+                    v-for="alias in argumentAliases(item)"
+                    :key="alias"
+                    :class="{ 'short-alias': isShortAlias(alias) }"
+                  >{{ alias }}</code>
+                </span>
+                <small>{{ item.description || item.value_hint }}</small>
+              </span>
+              <em>{{ item.category }}</em>
             </button>
           </div>
         </PageSection>

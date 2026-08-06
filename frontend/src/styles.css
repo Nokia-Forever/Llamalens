@@ -186,6 +186,9 @@ code, pre, .metric-block strong, .data-table td:not(:first-child) { font-family:
 .catalog-row:last-child { border-bottom: 0; }
 .catalog-row:hover { background: var(--surface-2); }
 .catalog-row > span { min-width: 0; display: grid; gap: 3px; }
+.catalog-aliases { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.catalog-aliases code { padding: 1px 4px; border-radius: 4px; background: var(--surface-2); font-size: 11px; }
+.catalog-aliases code.short-alias { background: var(--accent-soft); color: var(--accent); }
 .catalog-row small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .catalog-row em { color: var(--muted); font-size: 10px; font-style: normal; }
 .argv-preview { display: grid; gap: 7px; margin-top: 10px; }
