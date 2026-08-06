@@ -181,6 +181,7 @@ code, pre, .metric-block strong, .data-table td:not(:first-child) { font-family:
 .editor-heading p { margin: 0; color: var(--muted); }
 .profile-lower-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
 .argument-catalog { max-height: 390px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.catalog-empty { margin: 10px; }
 .catalog-refresh { margin-bottom: 10px; }
 .catalog-row { width: 100%; min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; }
 .catalog-row:last-child { border-bottom: 0; }

@@ -10,3 +10,5 @@ frontend/dist/
 *.db-shm
 *.db-wal
 *.part
+person_use.txt
+

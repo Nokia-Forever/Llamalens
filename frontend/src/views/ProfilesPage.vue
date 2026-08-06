@@ -19,7 +19,10 @@ const form = reactive({ name: '', model_path: '', catalog_args: [] as SelectedAr
 
 const selected = computed(() => profiles.value.find((profile) => profile.id === selectedId.value) || null)
 const filteredCatalog = computed(() => {
-  const needle = search.value.toLowerCase()
+  const needle = search.value.trim().toLowerCase().replace(/(-{1,2})\s+/g, '$1')
+  if (needle === '-') {
+    return catalog.value.filter((item) => item.aliases.some(isShortAlias)).slice(0, 100)
+  }
   return catalog.value.filter((item) => `${item.key} ${item.aliases.join(' ')} ${item.description} ${item.category}`.toLowerCase().includes(needle)).slice(0, 100)
 })
 const preview = computed(() => {
@@ -160,6 +163,9 @@ onMounted(load)
           <button type="button" class="button secondary catalog-refresh" @click="refreshCatalog"><IconRefresh :size="17" />刷新本机参数</button>
           <label class="search-box full"><IconSearch :size="17" /><input v-model="search" placeholder="搜索 parallel、batch、GPU 或 flag" /></label>
           <div class="argument-catalog">
+            <div v-if="!filteredCatalog.length" class="empty-state compact catalog-empty">
+              {{ catalog.length ? '没有匹配的参数，请尝试清空搜索条件。' : '参数目录为空，请先刷新本机参数并检查 llama-server 路径。' }}
+            </div>
             <button v-for="item in filteredCatalog" :key="item.id" type="button" class="catalog-row" @click="addArgument(item)">
               <span>
                 <span class="catalog-aliases">
