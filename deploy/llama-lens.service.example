@@ -1,0 +1,19 @@
+[Unit]
+Description=LlamaLens local llama.cpp console
+After=network.target
+
+[Service]
+Type=simple
+User=llama-lens
+Group=llama-lens
+WorkingDirectory=/opt/llama-lens/backend
+Environment=PYTHONPATH=/opt/llama-lens/backend
+Environment=LLAMALENS_DATA_DIR=/var/lib/llama-lens
+Environment=LLAMALENS_FRONTEND_DIST=/opt/llama-lens/frontend/dist
+ExecStart=/opt/llama-lens/.venv/bin/python -m app.web
+Restart=on-failure
+RestartSec=3
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+# Copy only after replacing the user and unit name for your machine.
+# Validate with: visudo -cf /etc/sudoers.d/llama-lens
+
+llama-lens ALL=(root) NOPASSWD: /usr/bin/systemctl status llama-server.service
+llama-lens ALL=(root) NOPASSWD: /usr/bin/systemctl start llama-server.service
+llama-lens ALL=(root) NOPASSWD: /usr/bin/systemctl stop llama-server.service
+llama-lens ALL=(root) NOPASSWD: /usr/bin/systemctl restart llama-server.service

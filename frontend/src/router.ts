@@ -1,0 +1,13 @@
+import { createRouter, createWebHistory } from 'vue-router'
+
+export const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    { path: '/', component: () => import('./views/DashboardPage.vue'), meta: { title: '概览' } },
+    { path: '/models', component: () => import('./views/ModelsPage.vue'), meta: { title: '模型库' } },
+    { path: '/profiles', component: () => import('./views/ProfilesPage.vue'), meta: { title: 'Profiles' } },
+    { path: '/benchmark', component: () => import('./views/BenchmarkPage.vue'), meta: { title: 'Benchmark' } },
+    { path: '/results', component: () => import('./views/ResultsPage.vue'), meta: { title: '结果' } },
+    { path: '/settings', component: () => import('./views/SettingsPage.vue'), meta: { title: '设置' } },
+  ],
+})

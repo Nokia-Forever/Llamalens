@@ -1,0 +1,19 @@
+[Unit]
+Description=llama.cpp server managed by LlamaLens Profiles
+After=network.target
+
+[Service]
+Type=simple
+User=llama
+Group=llama
+WorkingDirectory=/opt/llama-lens/backend
+Environment=PYTHONPATH=/opt/llama-lens/backend
+ExecStart=/opt/llama-lens/.venv/bin/python -m app.runner --profile /var/lib/llama-lens/active-profile.json
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=15min
+TimeoutStopSec=2min
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
