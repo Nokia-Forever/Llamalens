@@ -180,10 +180,11 @@ onBeforeUnmount(() => timer && window.clearInterval(timer))
       </div>
       <StatusBadge :status="current?.status || 'idle'" />
       <div class="monitor-metrics">
-        <MetricBlock label="TTFT median" :value="`${format(metrics.ttft_ms?.median)} ms`" accent />
-        <MetricBlock label="Prefill median" :value="`${format(metrics.prefill_tps?.median)} tok/s`" />
-        <MetricBlock label="Decode median" :value="`${format(metrics.decode_tps?.median)} tok/s`" />
-        <MetricBlock label="Client decode" :value="`${format(metrics.client_decode_tps?.median)} tok/s`" />
+          <MetricBlock label="TTFT median" :value="`${format(metrics.ttft_ms?.median)} ms`" accent />
+          <MetricBlock label="Prefill median" :value="`${format(metrics.prefill_tps?.median)} tok/s`" />
+          <MetricBlock label="Decode median" :value="`${format(metrics.decode_tps?.median)} tok/s`" />
+          <MetricBlock label="Client decode" :value="`${format(metrics.client_decode_tps?.median)} tok/s`" />
+          <MetricBlock label="Total median" :value="`${format(metrics.total_ms?.median)} ms`" />
       </div>
       <div v-if="current" class="job-facts">
         <span>成功 <strong>{{ current.summary.successes || 0 }}</strong></span>

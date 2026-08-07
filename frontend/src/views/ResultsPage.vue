@@ -148,7 +148,7 @@ onMounted(load)
       <div v-else-if="!filtered.length" class="empty-state">没有符合筛选条件的测试结果。</div>
       <div v-else class="data-table-wrap">
         <table class="data-table results-table">
-          <thead><tr><th class="checkbox-cell"><input type="checkbox" :checked="allFilteredSelected" aria-label="全选当前筛选结果" @change="toggleFiltered" /></th><th>测试</th><th>目标</th><th>TTFT</th><th>Prefill</th><th>Decode</th><th>成功/失败</th><th>状态</th></tr></thead>
+          <thead><tr><th class="checkbox-cell"><input type="checkbox" :checked="allFilteredSelected" aria-label="全选当前筛选结果" @change="toggleFiltered" /></th><th>测试</th><th>目标</th><th>TTFT</th><th>Prefill</th><th>Decode</th><th>Total</th><th>成功/失败</th><th>状态</th></tr></thead>
           <tbody>
             <tr v-for="job in filtered" :key="job.id" tabindex="0" :class="{ selected: selected?.id === job.id }" @click="selectJob(job.id)" @keydown.enter="selectJob(job.id)">
               <td class="checkbox-cell" @click.stop><input v-model="selectedIds" type="checkbox" :value="job.id" :aria-label="`选择 ${job.name}`" /></td>
@@ -157,6 +157,7 @@ onMounted(load)
               <td>{{ format(metric(job, 'ttft_ms')) }} ms</td>
               <td>{{ format(metric(job, 'prefill_tps')) }} tok/s</td>
               <td>{{ format(metric(job, 'decode_tps')) }} tok/s</td>
+              <td>{{ format(metric(job, 'total_ms')) }} ms</td>
               <td>{{ job.summary.successes || 0 }} / {{ job.summary.failures || 0 }}</td>
               <td><StatusBadge :status="job.status" /></td>
             </tr>
@@ -193,6 +194,8 @@ onMounted(load)
             <span><small>TTFT</small><strong>{{ format(attempt.ttft_ms) }} ms</strong></span>
             <span><small>Prefill</small><strong>{{ format(attempt.prefill_tps) }}</strong></span>
             <span><small>Decode</small><strong>{{ format(attempt.decode_tps) }}</strong></span>
+            <span><small>Total</small><strong>{{ format(attempt.total_ms) }} ms</strong></span>
+            <span><small>输入 / 输出 tokens</small><strong>{{ attempt.prompt_tokens ?? 'N/A' }} / {{ attempt.predicted_tokens ?? 'N/A' }}</strong></span>
             <StatusBadge :status="attempt.status" />
             <IconChevronDown class="attempt-chevron" :size="18" />
           </summary>
