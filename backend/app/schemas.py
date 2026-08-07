@@ -138,8 +138,13 @@ class BenchmarkCreate(BaseModel):
     cache_prompt: bool = False
     warmup_runs: int = Field(default=1, ge=0, le=100)
     repeat_runs: int = Field(default=3, ge=1, le=100)
+    repeat_delay_ms: int = Field(default=0, ge=0, le=600000)
     concurrency: int = Field(default=1, ge=1, le=128)
     extra_params: dict[str, Any] = Field(default_factory=dict)
+
+
+class BenchmarkBulkDelete(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=200)
 
 
 class DownloadCreate(BaseModel):

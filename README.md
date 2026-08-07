@@ -24,8 +24,10 @@ LlamaLens 是一个部署在 llama.cpp 推理机本机的轻量 Web 控制台。
 - 重复参数只警告、不阻止，别名也会归一后检查；最终顺序保持不变。
 - 只有 Services 页面会显式写入 unit 并执行 `daemon-reload`、`enable --now` 和 `status`；Profile 页面没有激活操作。
 - Benchmark 只能选择 Service 已成功部署的 applied 模型 alias，并保存完整 Service 与 applied 启动快照。
+- Benchmark 支持 warm-up、正式重复轮次间隔、并发、Prompt cache、stop、seed、temperature、timeout 和额外 JSON 参数。
+- 结果页展示关键汇总指标，并可按轮次展开模型回答、请求、资源和原始响应。
+- 测试结果支持单个或批量删除；CSV 只导出复选框选中的结果。
 - 内部 SSE 测 TTFT，流结束事件读取 timings；缺少 timings 时执行有明确标记的配对非流式请求。
-- 支持 warm-up、重复次数、并发、Prompt cache、stop、seed、temperature、timeout 和额外 JSON 参数。
 - 展示 median、p10、p90、min、max、失败次数、每轮证据和 CSV 导出。
 
 ## 开发运行

@@ -77,6 +77,15 @@ export interface BenchmarkAttempt {
   error: string | null
 }
 
+export interface BenchmarkAttemptDetail extends BenchmarkAttempt {
+  job_id: string
+  request: Record<string, unknown>
+  response: unknown
+  output_text: string
+  resource: Record<string, unknown>
+  created_at: string
+}
+
 export interface MetricSummary {
   median: number | null
   p10: number | null

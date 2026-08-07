@@ -28,6 +28,7 @@ const form = reactive({
   cache_prompt: false,
   warmup_runs: 1,
   repeat_runs: 3,
+  repeat_delay_ms: 0,
   concurrency: 1,
 })
 
@@ -149,14 +150,15 @@ onBeforeUnmount(() => timer && window.clearInterval(timer))
           <label class="field"><span>Max tokens</span><input v-model.number="form.max_tokens" type="number" min="1" /></label>
           <label class="field"><span>Timeout 秒</span><input v-model.number="form.timeout_seconds" type="number" min="1" /></label>
           <label class="field"><span>Temperature</span><input v-model.number="form.temperature" type="number" min="0" step="0.1" /></label>
-          <label class="field"><span>Seed</span><input v-model="seedText" type="number" /><small>留空表示不发送 seed。</small></label>
-          <label class="field"><span>Warm-up 次数</span><input v-model.number="form.warmup_runs" type="number" min="0" /></label>
+          <label class="field"><span>Seed</span><input v-model="seedText" type="number" /><small>固定随机种子有助于复现输出；留空表示不发送。</small></label>
+          <label class="field"><span>Warm-up 次数</span><input v-model.number="form.warmup_runs" type="number" min="0" /><small>正式统计前预热，不计入 median、p10、p90。</small></label>
           <label class="field"><span>正式重复次数</span><input v-model.number="form.repeat_runs" type="number" min="1" /></label>
+          <label class="field"><span>重复间隔 ms</span><input v-model.number="form.repeat_delay_ms" type="number" min="0" max="600000" /><small>只在正式轮次之间等待，最后一轮后不等待。</small></label>
           <label class="field"><span>并发数</span><input v-model.number="form.concurrency" type="number" min="1" /></label>
-          <label class="check-field"><input v-model="form.cache_prompt" type="checkbox" /><span>允许 Prompt cache</span></label>
+          <label class="check-field parameter-check"><input v-model="form.cache_prompt" type="checkbox" /><span>允许 Prompt cache<small>开启会复用相同 Prompt 的缓存，更接近缓存命中性能。</small></span></label>
         </div>
         <div class="form-grid two-columns">
-          <label class="field"><span>Stop，每行一个</span><textarea v-model="stopText" rows="4" /></label>
+          <label class="field"><span>Stop，每行一个</span><textarea v-model="stopText" rows="4" /><small>生成内容遇到任意停止字符串时提前结束。</small></label>
           <label class="field"><span>额外请求参数 JSON</span><textarea v-model="extraText" rows="4" spellcheck="false" /></label>
         </div>
       </PageSection>

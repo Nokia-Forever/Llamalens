@@ -160,6 +160,35 @@ def _content_from_event(event: dict[str, Any]) -> str:
     return ""
 
 
+def extract_output_text(payload: Any) -> str:
+    if not isinstance(payload, (dict, list)):
+        return ""
+    if isinstance(payload, dict):
+        content = payload.get("content")
+        if isinstance(content, str) and content:
+            return content
+        stream = payload.get("stream")
+        if isinstance(stream, (dict, list)):
+            output = extract_output_text(stream)
+            if output:
+                return output
+        events = payload.get("events")
+        if isinstance(events, list):
+            output = "".join(_content_from_event(event) for event in events if isinstance(event, dict))
+            if output:
+                return output
+        choices = payload.get("choices")
+        if isinstance(choices, list):
+            output = "".join(_content_from_event({"choices": [choice]}) for choice in choices if isinstance(choice, dict))
+            if output:
+                return output
+        paired = payload.get("paired")
+        if isinstance(paired, (dict, list)):
+            return extract_output_text(paired)
+        return ""
+    return "".join(extract_output_text(item) for item in payload)
+
+
 def _parse_number(mapping: dict[str, Any] | None, *keys: str) -> float | None:
     if not mapping:
         return None
@@ -417,6 +446,18 @@ def _run_wave(job_id: str, settings: AppSettings, config: BenchmarkCreate, warmu
     return start_ordinal + workers
 
 
+def _wait_repeat_delay(job_id: str, delay_ms: int) -> bool:
+    if delay_ms <= 0:
+        return not _is_cancelled(job_id)
+    deadline = time.monotonic() + (delay_ms / 1000)
+    while not _is_cancelled(job_id):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return True
+        time.sleep(min(remaining, 0.1))
+    return False
+
+
 def _run_job(job_id: str) -> None:
     with EXECUTION_LOCK:
         _run_job_locked(job_id)
@@ -448,10 +489,12 @@ def _run_job_locked(job_id: str) -> None:
             if _is_cancelled(job_id):
                 break
             ordinal = _run_wave(job_id, settings, config, True, ordinal)
-        for _ in range(config.repeat_runs):
+        for repeat_index in range(config.repeat_runs):
             if _is_cancelled(job_id):
                 break
             ordinal = _run_wave(job_id, settings, config, False, ordinal)
+            if repeat_index + 1 < config.repeat_runs and not _wait_repeat_delay(job_id, config.repeat_delay_ms):
+                break
         summary = _summarize(job_id)
         db = SessionLocal()
         try:
