@@ -21,6 +21,7 @@ def test_profile_crud_and_argv(tmp_path: Path):
             ProfileCreate(
                 name="Qwen test",
                 model_path=str(model),
+                model_alias="qwen-test",
                 catalog_args=[CatalogArgumentInput(flag="--ctx-size", value="8192")],
                 custom_args_text="-np 1",
             ),
@@ -31,7 +32,7 @@ def test_profile_crud_and_argv(tmp_path: Path):
             db,
             settings,
             profile,
-            ProfileCreate(name="Updated", model_path=str(model), custom_args_text="--flash-attn auto"),
+            ProfileCreate(name="Updated", model_path=str(model), model_alias="updated", custom_args_text="--flash-attn auto"),
         )
         assert updated.name == "Updated"
     finally:

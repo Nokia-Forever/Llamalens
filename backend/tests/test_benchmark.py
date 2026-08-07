@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.database import SessionLocal
-from app.models import Profile, SwitchJob
-from app.schemas import AppSettings, BenchmarkCreate
+from app.models import LlamaService
+from app.schemas import AppSettings, BenchmarkCreate, LaunchConfig, LlamaServiceCreate
 from app.services import benchmark
 
 
@@ -74,15 +76,27 @@ def test_model_alias_is_added_to_benchmark_request():
     assert payload["model"] == "qwen-router"
 
 
-def test_benchmark_rejected_while_profile_switch_is_pending(monkeypatch):
+def test_benchmark_requires_applied_service(monkeypatch):
     db = SessionLocal()
     try:
-        profile = Profile(id="profile-1", name="one", model_path="/models/one.gguf")
-        db.add(profile)
-        db.add(SwitchJob(id="switch-1", profile_id=profile.id, status="queued"))
+        service = LlamaService(
+            id="service-1", name="one", unit_name="llamalens-one.service",
+            unit_path="/etc/systemd/system/llamalens-one.service", server_bin="/opt/llama-server",
+            host="127.0.0.1", port=8080,
+        )
+        db.add(service)
         db.commit()
         monkeypatch.setattr(benchmark.BENCHMARK_EXECUTOR, "submit", lambda *_args, **_kwargs: None)
-        with pytest.raises(ValueError, match="正在切换"):
-            benchmark.create_benchmark_job(db, BenchmarkCreate(prompt="hello"))
+        with pytest.raises(ValueError, match="尚未成功部署"):
+            benchmark.create_benchmark_job(db, BenchmarkCreate(prompt="hello", service_id=service.id, model_alias="one"))
+        service.applied_launch_config_json = LaunchConfig(mode="single", model_path="/models/one.gguf", model_alias="one").model_dump_json()
+        service.applied_service_config_json = LlamaServiceCreate(
+            name="one", unit_name="llamalens-one.service", server_bin="/opt/llama-server",
+            host="127.0.0.1", port=9000,
+        ).model_dump_json()
+        db.commit()
+        job = benchmark.create_benchmark_job(db, BenchmarkCreate(prompt="hello", service_id=service.id, model_alias="one"))
+        assert job.service_id == service.id
+        assert json.loads(job.config_json)["service_snapshot"]["port"] == 9000
     finally:
         db.close()

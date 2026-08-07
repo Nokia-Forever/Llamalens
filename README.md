@@ -1,6 +1,6 @@
 # LlamaLens
 
-LlamaLens 是一个部署在 llama.cpp 推理机本机的轻量 Web 控制台。它可以创建和管理多个 `llama-server` systemd service，把模型和启动参数保存为 Profile，并用独立 Benchmark 请求测量：
+LlamaLens 是一个部署在 llama.cpp 推理机本机的轻量 Web 控制台。它可以创建和管理多个 `llama-server` systemd service，把模型和启动参数保存为可复用 Profile 模板，再复制到具体 Service 后显式部署，并用独立 Benchmark 请求测量：
 
 - TTFT：请求开始到第一个实际内容 token 到达的时间。
 - Prefill tok/s：llama.cpp 返回的 `timings.prompt_per_second`。
@@ -11,18 +11,19 @@ LlamaLens 是一个部署在 llama.cpp 推理机本机的轻量 Web 控制台。
 
 ## 当前能力
 
-- 创建多个独立的 Llama service，分别配置二进制、端口、运行用户和模型参数。
-- 支持单模型 `--model/--alias` 和 Router `--models-dir/--models-preset/--models-max/--models-autoload`。
+- 创建多个独立的 Llama Service，分别配置二进制、端口、运行用户、WorkingDirectory 和 systemd 参数。
+- Profile 是独立启动模板，支持单模型 `--model/--alias` 和 Router `--models-dir/--models-preset/--models-max/--models-autoload`。
+- Service 导入 Profile 时复制完整模型与 llama 参数；之后可独立修改，不与原 Profile 或其他 Service 联动。
+- Service 分别保存 draft 与最后一次成功部署的 applied 快照；保存草稿不会自动重启。
 - 在 `[Unit]`、`[Service]`、`[Install]` 中追加自定义指令，并在部署前预览、复制或下载完整 unit。
 - 写入 unit 后执行 `daemon-reload`、`enable --now`，并支持启停、重启、日志、归档恢复和彻底删除。
 - 扫描多个模型目录，搜索 Hugging Face GGUF 文件并创建后台下载任务。
-- Profile 只要求名称和 GGUF 模型；其它参数从可搜索目录按需添加。
+- Profiles 与 Service 本地副本复用同一套模型、Router、参数目录和自定义参数编辑器。
 - 从目标机 `llama-server --help` 刷新参数目录，并保留内置兼容目录。
 - 自定义参数按行使用 POSIX `shlex` 分词并追加到最终 argv，例如 `-np 1`。
 - 重复参数只警告、不阻止，别名也会归一后检查；最终顺序保持不变。
-- 原子写入 Active Profile，重启失败时恢复文件和数据库 Active 标记。
-- Benchmark 与 Profile 切换使用同一执行锁，避免测试期间更换模型。
-- Benchmark 保存当前 Profile、Profile version 和完整 argv 快照。
+- 只有 Services 页面会显式写入 unit 并执行 `daemon-reload`、`enable --now` 和 `status`；Profile 页面没有激活操作。
+- Benchmark 只能选择 Service 已成功部署的 applied 模型 alias，并保存完整 Service 与 applied 启动快照。
 - 内部 SSE 测 TTFT，流结束事件读取 timings；缺少 timings 时执行有明确标记的配对非流式请求。
 - 支持 warm-up、重复次数、并发、Prompt cache、stop、seed、temperature、timeout 和额外 JSON 参数。
 - 展示 median、p10、p90、min、max、失败次数、每轮证据和 CSV 导出。
@@ -63,8 +64,9 @@ Vite 会把 `/api` 代理到 `127.0.0.1:8000`。
 1. 把项目放到 `/opt/llama-lens`，创建虚拟环境并构建前端。
 2. 创建 `/var/lib/llama-lens` 数据目录，并让 LlamaLens 可写。
 3. 创建 LlamaLens 自身的 service，并以 `User=root` 运行。
-4. 在 Services 页面填写 `llama-server` 路径、模型模式、端口和 systemd 自定义指令。
-5. 先生成预览，确认后保存并点击“部署 enable --now”。
+4. 在 Profiles 页面创建单模型或 Router 启动模板。
+5. 在 Services 页面填写 `llama-server` 路径、端口、运行用户和 systemd 自定义指令，再导入一个 Profile。
+6. 按需编辑 Service 本地副本，生成 unit 预览，确认后点击“应用并部署”。
 
 Services 页面生成的 unit 名强制使用 `llamalens-*.service`，例如：
 
@@ -76,7 +78,7 @@ Port: 8080
 Alias: qwen
 ```
 
-每个 service 的 Host/Port 同时用于启动参数、健康检查和 Benchmark。Benchmark 页面先选择 service，再选择该 service 内登记的模型 alias。
+每个 Service 的 Host/Port 同时用于启动参数、健康检查和 Benchmark。Benchmark 页面先选择 Service，再选择该 Service 的 applied 快照中登记的模型 alias；只有草稿而未成功部署的 Service 不能测试。
 
 ### systemctl 是否需要 root
 
@@ -89,19 +91,13 @@ Alias: qwen
 
 ### 文件权限
 
-`active-profile.json` 必须同时满足：
-
-- LlamaLens 运行用户可创建和原子替换；
-- llama.cpp service 运行用户可读取；
-- 父目录不能对无关用户开放写权限。
-
-模型目录至少要让 llama.cpp 用户可读。若启用 Web 下载，还要让 LlamaLens 用户对选定下载目录可写。
+`/etc/systemd/system` 与 LlamaLens 数据目录必须只允许受信任的管理员写入。模型目录至少要让各 llama.cpp Service 的运行用户可读。若启用 Web 下载，还要让 LlamaLens 用户对选定下载目录可写。
 
 ## Web 暴露风险
 
 V1 没有账号密码。默认只能监听 `127.0.0.1`。如果设置为 `0.0.0.0`，任何能访问该端口的人都可能：
 
-- 切换模型并重启 service；
+- 修改模板、部署或重启任意受管 Service；
 - 发起大文件下载；
 - 运行消耗 GPU/CPU 的 Benchmark；
 - 查看本机配置和 service 日志。
@@ -110,7 +106,7 @@ V1 没有账号密码。默认只能监听 `127.0.0.1`。如果设置为 `0.0.0.
 
 ## Benchmark 说明
 
-Benchmark 配置和 llama.cpp 启动 Profile 是两套数据。`max_tokens`、Prompt、timeout、temperature 等只进入 HTTP 请求，不会写入 systemd service。
+Benchmark 请求配置和 Service 启动配置是两套数据。`max_tokens`、Prompt、timeout、temperature 等只进入 HTTP 请求，不会写入 systemd Service。每个任务保存创建时的 applied 启动快照，因此后续修改 Profile、Service 草稿或重新部署都不会改变历史结果。
 
 为了准确测 TTFT，后端会在内部设置 `stream=true` 并读取 SSE，但 Vue 页面不会显示逐 token 输出。Prefill 和 Decode 的主要值只读取 llama.cpp timings，避免把 HTTP 总耗时误当成推理速度。
 

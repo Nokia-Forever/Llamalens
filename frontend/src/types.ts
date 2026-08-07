@@ -43,14 +43,18 @@ export interface ModelFile {
 
 export interface Profile {
   id: string
-  service_id: string | null
-  model_alias: string
   name: string
+  mode: 'single' | 'router'
   model_path: string
+  model_alias: string
+  models_dir: string
+  models_preset: string
+  models_max: number
+  models_autoload: boolean
+  models: LaunchModel[]
   catalog_args: SelectedArgument[]
   custom_args_text: string
   labels: Record<string, string>
-  is_active: boolean
   final_argv: string[]
   warnings: string[]
   created_at: string
@@ -101,12 +105,26 @@ export interface BenchmarkJob {
   attempts?: BenchmarkAttempt[]
 }
 
-export interface ServiceModel {
+export interface LaunchModel {
   id?: string
   alias: string
   model_path: string
   display_name: string
   enabled: boolean
+}
+
+export interface LaunchConfig {
+  mode: 'single' | 'router'
+  model_path: string
+  model_alias: string
+  models_dir: string
+  models_preset: string
+  models_max: number
+  models_autoload: boolean
+  models: LaunchModel[]
+  catalog_args: SelectedArgument[]
+  custom_args_text: string
+  labels: Record<string, string>
 }
 
 export interface LlamaService {
@@ -123,19 +141,17 @@ export interface LlamaService {
   port: number
   health_path: string
   request_path: string
-  mode: 'single' | 'router'
-  model_path: string
-  model_alias: string
-  models_dir: string
-  models_preset: string
-  models_max: number
-  models_autoload: boolean
-  models: ServiceModel[]
-  custom_args_text: string
   unit_extra_text: string
   service_extra_text: string
   install_extra_text: string
   rendered_unit: string
+  source_profile_id: string | null
+  applied_source_profile_id: string | null
+  draft_launch_config: LaunchConfig | null
+  applied_launch_config: LaunchConfig | null
+  applied_service_config: Record<string, unknown> | null
+  applied_model_aliases: string[]
+  has_pending_changes: boolean
   archived_at: string | null
   created_at: string
   updated_at: string

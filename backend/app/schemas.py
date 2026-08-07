@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class AppSettings(BaseModel):
@@ -60,14 +60,55 @@ class CatalogArgumentInput(BaseModel):
     value: str = ""
 
 
-class ProfileCreate(BaseModel):
-    service_id: str | None = None
+class LaunchModelInput(BaseModel):
+    alias: str = Field(min_length=1, max_length=200)
+    model_path: str = ""
+    display_name: str = ""
+    enabled: bool = True
+
+    @field_validator("alias")
+    @classmethod
+    def validate_launch_alias(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(char.isspace() for char in value):
+            raise ValueError("模型 alias 不能为空或包含空白字符")
+        return value
+
+
+class LaunchConfig(BaseModel):
+    mode: Literal["single", "router"] = "single"
+    model_path: str = ""
     model_alias: str = ""
-    name: str = Field(min_length=1, max_length=200)
-    model_path: str = Field(min_length=1)
+    models_dir: str = ""
+    models_preset: str = ""
+    models_max: int = Field(default=0, ge=0)
+    models_autoload: bool = False
+    models: list[LaunchModelInput] = Field(default_factory=list)
     catalog_args: list[CatalogArgumentInput] = Field(default_factory=list)
     custom_args_text: str = ""
     labels: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_launch_config(self):
+        if self.mode == "single":
+            if not self.model_path.strip():
+                raise ValueError("单模型 Profile 必须设置模型路径")
+            if not self.model_alias.strip() or any(char.isspace() for char in self.model_alias):
+                raise ValueError("单模型 Profile 必须设置不含空白的 alias")
+        else:
+            if not self.models_dir.strip():
+                raise ValueError("Router Profile 必须设置 models directory")
+            enabled = [item for item in self.models if item.enabled]
+            if not enabled:
+                raise ValueError("Router Profile 至少需要一个启用的模型 alias")
+            aliases = [item.alias for item in enabled]
+            if len(aliases) != len(set(aliases)):
+                raise ValueError("同一 Profile 中的模型 alias 不能重复")
+        return self
+
+
+class ProfileCreate(LaunchConfig):
+    name: str = Field(min_length=1, max_length=200)
 
 
 class ProfileUpdate(ProfileCreate):
@@ -77,7 +118,6 @@ class ProfileUpdate(ProfileCreate):
 class ProfileOut(ProfileCreate):
     model_config = ConfigDict(from_attributes=True)
     id: str
-    is_active: bool
     final_argv: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     created_at: datetime
@@ -139,15 +179,6 @@ class LlamaServiceCreate(BaseModel):
     port: int = 8080
     health_path: str = "/health"
     request_path: str = "/completion"
-    mode: Literal["single", "router"] = "single"
-    model_path: str = ""
-    model_alias: str = ""
-    models_dir: str = ""
-    models_preset: str = ""
-    models_max: int = Field(default=0, ge=0)
-    models_autoload: bool = False
-    models: list[ServiceModelInput] = Field(default_factory=list)
-    custom_args_text: str = ""
     unit_extra_text: str = ""
     service_extra_text: str = ""
     install_extra_text: str = ""
@@ -162,3 +193,7 @@ class LlamaServiceCreate(BaseModel):
 
 class LlamaServiceUpdate(LlamaServiceCreate):
     pass
+
+
+class SelectProfileInput(BaseModel):
+    profile_id: str

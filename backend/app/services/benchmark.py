@@ -16,11 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import BenchmarkAttempt, BenchmarkJob, LlamaService, Profile, ProfileVersion, SwitchJob
-from app.schemas import AppSettings, BenchmarkCreate
+from app.models import BenchmarkAttempt, BenchmarkJob, LlamaService, Profile, ProfileVersion
+from app.schemas import AppSettings, BenchmarkCreate, LaunchConfig, LlamaServiceCreate
 from app.services.job_control import EXECUTION_LOCK
 from app.services.settings_service import get_settings
-from app.services.llama_services import app_settings_for_service
+from app.services.llama_services import launch_aliases
 
 
 BENCHMARK_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llamalens-benchmark")
@@ -29,41 +29,58 @@ _cancel_lock = threading.Lock()
 
 
 def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
-    switching = db.scalar(select(SwitchJob).where(SwitchJob.status.in_(["queued", "activating"])).limit(1))
-    if switching is not None:
-        raise ValueError("Profile 正在切换，完成后才能创建 Benchmark")
-    service = db.get(LlamaService, payload.service_id) if payload.service_id else None
-    if payload.service_id and (service is None or service.archived_at is not None):
+    if not payload.service_id:
+        raise ValueError("请选择 Benchmark 目标服务")
+    service = db.get(LlamaService, payload.service_id)
+    if service is None or service.archived_at is not None:
         raise ValueError("Benchmark 目标服务不存在或已归档")
-    if service is not None:
-        aliases = {item.alias for item in service.models if item.enabled}
-        if not payload.model_alias or payload.model_alias not in aliases:
-            raise ValueError("请选择目标服务中有效的模型 alias")
-    active_query = select(Profile).where(Profile.is_active.is_(True))
-    if payload.service_id:
-        active_query = active_query.where(Profile.service_id == payload.service_id)
-    active = db.scalar(active_query)
-    if payload.profile_id and (active is None or payload.profile_id != active.id):
-        raise ValueError("Benchmark 只能关联当前激活的 Profile")
+    if not service.applied_launch_config_json:
+        raise ValueError("目标服务尚未成功部署，没有可测试的 applied 配置")
+    applied = LaunchConfig.model_validate_json(service.applied_launch_config_json)
+    applied_service = (
+        LlamaServiceCreate.model_validate_json(service.applied_service_config_json)
+        if service.applied_service_config_json
+        else LlamaServiceCreate(
+            name=service.name, description=service.description, unit_name=service.unit_name,
+            server_bin=service.server_bin, service_user=service.service_user, service_group=service.service_group,
+            working_directory=service.working_directory, host=service.host, port=service.port,
+            health_path=service.health_path, request_path=service.request_path,
+            unit_extra_text=service.unit_extra_text, service_extra_text=service.service_extra_text,
+            install_extra_text=service.install_extra_text,
+        )
+    )
+    aliases = set(launch_aliases(applied))
+    if not payload.model_alias or payload.model_alias not in aliases:
+        raise ValueError("请选择目标服务已部署配置中的模型 alias")
 
-    profile_id = active.id if active is not None else None
+    profile_id = service.applied_source_profile_id
     config_payload = payload.model_dump(mode="json")
-    if active is not None:
+    source_profile = db.get(Profile, profile_id) if profile_id else None
+    if source_profile is not None:
         version = db.scalar(
             select(ProfileVersion)
-            .where(ProfileVersion.profile_id == active.id)
+            .where(ProfileVersion.profile_id == source_profile.id)
             .order_by(ProfileVersion.created_at.desc())
             .limit(1)
         )
         config_payload["profile_snapshot"] = {
-            "id": active.id,
-            "name": active.name,
-            "model_path": active.model_path,
+            "id": source_profile.id,
+            "name": source_profile.name,
             "profile_version_id": version.id if version else None,
-            "argv": json.loads(version.argv_json) if version else None,
+            "source_only": True,
         }
     else:
         config_payload["profile_snapshot"] = None
+    config_payload["service_snapshot"] = {
+        "id": service.id,
+        "name": applied_service.name,
+        "host": applied_service.host,
+        "port": applied_service.port,
+        "health_path": applied_service.health_path,
+        "request_path": applied_service.request_path,
+        "runtime_config": applied_service.model_dump(mode="json"),
+        "applied_launch_config": applied.model_dump(mode="json"),
+    }
 
     job = BenchmarkJob(
         id=str(uuid.uuid4()),
@@ -411,13 +428,14 @@ def _run_job_locked(job_id: str) -> None:
         job = db.get(BenchmarkJob, job_id)
         if job is None:
             return
-        config = BenchmarkCreate.model_validate_json(job.config_json)
+        raw_config = json.loads(job.config_json)
+        config = BenchmarkCreate.model_validate(raw_config)
         settings = get_settings(db)
-        if config.service_id:
-            service = db.get(LlamaService, config.service_id)
-            if service is None or service.archived_at is not None:
-                raise ValueError("Benchmark 目标服务不存在或已归档")
-            settings = app_settings_for_service(service, settings)
+        snapshot = raw_config.get("service_snapshot") or {}
+        settings.llama_host = str(snapshot.get("host") or settings.llama_host)
+        settings.llama_port = int(snapshot.get("port") or settings.llama_port)
+        settings.health_path = str(snapshot.get("health_path") or settings.health_path)
+        settings.request_path = str(snapshot.get("request_path") or settings.request_path)
         job.status = "running"
         job.started_at = datetime.now(timezone.utc)
         db.commit()

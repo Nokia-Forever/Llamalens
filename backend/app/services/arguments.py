@@ -278,10 +278,32 @@ def build_profile_argv(
     known_flags: set[str] | None = None,
     canonical_flags: dict[str, str] | None = None,
 ) -> ArgvBuildResult:
-    argv = [settings.llama_server_bin, "--model", model_path, "--host", settings.llama_host, "--port", str(settings.llama_port)]
+    return build_server_argv(
+        settings,
+        ["--model", model_path],
+        catalog_args,
+        custom_args_text,
+        known_flags,
+        canonical_flags,
+    )
+
+
+def build_server_argv(
+    settings: AppSettings,
+    launch_args: list[str],
+    catalog_args: list[CatalogArgumentInput],
+    custom_args_text: str,
+    known_flags: set[str] | None = None,
+    canonical_flags: dict[str, str] | None = None,
+) -> ArgvBuildResult:
+    argv = [settings.llama_server_bin, *launch_args, "--host", settings.llama_host, "--port", str(settings.llama_port)]
     warnings: list[str] = []
     canonical = canonical_flags or {}
-    seen: dict[str, int] = {"--model": 1, "--host": 1, "--port": 1}
+    seen: dict[str, int] = {"--host": 1, "--port": 1}
+    for token in launch_args:
+        if _looks_like_flag(token):
+            identity = canonical.get(token, token)
+            seen[identity] = seen.get(identity, 0) + 1
     for item in catalog_args:
         if not _looks_like_flag(item.flag):
             raise ValueError(f"参数 {item.flag!r} 不是合法 flag")

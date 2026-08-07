@@ -1,5 +1,7 @@
 # LlamaLens 实施设计（V1：单机 llama.cpp 控制台）
 
+> 注意：本文保留了早期“单 Service + Active Profile”的设计背景。当前实现已经演进为“Profile 模板 → Service 本地 draft → systemd unit 预览 → 显式部署 → applied 快照”：Profile 不绑定或激活 Service；Services 页面负责多 Service 生命周期与部署；Benchmark 只使用成功部署的 applied 快照。当前使用方式以项目 README 和 `/api/v1/services` 接口为准。
+
 ## 1. 目标、边界与默认假设
 
 LlamaLens 是部署在 **llama.cpp 推理服务器本机** 的 Web 控制台，用来：

@@ -3,19 +3,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import LlamaService
-from app.schemas import LlamaServiceCreate, LlamaServiceUpdate, ServiceAction
+from app.models import LlamaService, Profile
+from app.schemas import LaunchConfig, LlamaServiceCreate, LlamaServiceUpdate, SelectProfileInput, ServiceAction
 from app.services.llama_services import (
     archive_service,
     create_service,
     delete_service,
     deploy_service,
-    render_unit,
+    preview_service,
     restore_service,
+    select_profile,
     serialize_service,
     service_logs,
+    update_launch_config,
     update_service,
 )
+from app.services.settings_service import get_settings
 from app.services.systemd import run_unit_action
 
 
@@ -27,14 +30,6 @@ def _get(db: Session, service_id: str) -> LlamaService:
     if row is None:
         raise HTTPException(status_code=404, detail="服务不存在")
     return row
-
-
-@router.post("/preview-unit")
-def preview_unit(payload: LlamaServiceCreate):
-    try:
-        return render_unit(payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("")
@@ -66,12 +61,47 @@ def edit_service(service_id: str, payload: LlamaServiceUpdate, db: Session = Dep
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/{service_id}/select-profile")
+def import_profile(service_id: str, payload: SelectProfileInput, db: Session = Depends(get_db)):
+    profile = db.get(Profile, payload.profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile 不存在")
+    return serialize_service(select_profile(db, _get(db, service_id), profile))
+
+
+@router.get("/{service_id}/launch-config")
+def get_launch_config(service_id: str, db: Session = Depends(get_db)):
+    row = _get(db, service_id)
+    if not row.draft_launch_config_json:
+        raise HTTPException(status_code=404, detail="服务还没有导入 Profile")
+    return LaunchConfig.model_validate_json(row.draft_launch_config_json)
+
+
+@router.patch("/{service_id}/launch-config")
+def edit_launch_config(service_id: str, payload: LaunchConfig, db: Session = Depends(get_db)):
+    try:
+        return serialize_service(update_launch_config(db, _get(db, service_id), get_settings(db), payload))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/{service_id}/preview-unit")
+def preview_unit(service_id: str, db: Session = Depends(get_db)):
+    try:
+        return preview_service(db, _get(db, service_id), get_settings(db))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/{service_id}/deploy")
 def deploy(service_id: str, db: Session = Depends(get_db)):
     row = _get(db, service_id)
     if row.archived_at is not None:
         raise HTTPException(status_code=409, detail="归档服务不能直接部署，请先恢复")
-    return deploy_service(row)
+    try:
+        return deploy_service(db, row, get_settings(db))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/{service_id}/action")
@@ -88,9 +118,15 @@ def logs(service_id: str, lines: int = Query(200, ge=1, le=500), db: Session = D
 
 
 @router.get("/{service_id}/models")
-def models(service_id: str, db: Session = Depends(get_db)):
+def models(service_id: str, applied: bool = True, db: Session = Depends(get_db)):
     row = _get(db, service_id)
-    return [{"id": item.id, "alias": item.alias, "model_path": item.model_path, "display_name": item.display_name, "enabled": item.enabled} for item in row.models]
+    raw = row.applied_launch_config_json if applied else row.draft_launch_config_json
+    if not raw:
+        return []
+    config = LaunchConfig.model_validate_json(raw)
+    if config.mode == "single":
+        return [{"alias": config.model_alias, "model_path": config.model_path, "display_name": config.model_alias, "enabled": True}]
+    return [item.model_dump() for item in config.models if item.enabled]
 
 
 @router.post("/{service_id}/archive")
@@ -106,16 +142,7 @@ def restore(service_id: str, db: Session = Depends(get_db)):
     row = _get(db, service_id)
     if row.archived_at is None:
         raise HTTPException(status_code=409, detail="服务未归档")
-    conflict = db.scalar(
-        select(LlamaService.id)
-        .where(
-            LlamaService.id != row.id,
-            LlamaService.host == row.host,
-            LlamaService.port == row.port,
-            LlamaService.archived_at.is_(None),
-        )
-        .limit(1)
-    )
+    conflict = db.scalar(select(LlamaService.id).where(LlamaService.id != row.id, LlamaService.host == row.host, LlamaService.port == row.port, LlamaService.archived_at.is_(None)).limit(1))
     if conflict:
         raise HTTPException(status_code=409, detail="该 host/port 已被另一个服务使用")
     return restore_service(db, row)

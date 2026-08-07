@@ -6,10 +6,9 @@ import MetricBlock from '../components/MetricBlock.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
-import type { BenchmarkJob, LlamaService, Profile } from '../types'
+import type { BenchmarkJob, LaunchModel, LlamaService } from '../types'
 
 const store = useAppStore()
-const profiles = ref<Profile[]>([])
 const services = ref<LlamaService[]>([])
 const serviceId = ref('')
 const modelAlias = ref('')
@@ -33,8 +32,14 @@ const form = reactive({
 })
 
 const selectedService = computed(() => services.value.find((item) => item.id === serviceId.value) || null)
-const serviceModels = computed(() => selectedService.value?.models.filter((item) => item.enabled) || [])
-const activeProfile = computed(() => profiles.value.find((item) => item.is_active && item.service_id === serviceId.value) || null)
+const serviceModels = computed<LaunchModel[]>(() => {
+  const config = selectedService.value?.applied_launch_config
+  if (!config) return []
+  if (config.mode === 'single') {
+    return [{ alias: config.model_alias, model_path: config.model_path, display_name: config.model_alias, enabled: true }]
+  }
+  return config.models.filter((item) => item.enabled)
+})
 const metrics = computed(() => current.value?.summary.metrics || {})
 const requestPreview = computed(() => ({
   ...safeExtra(false),
@@ -59,11 +64,14 @@ function safeExtra(throwOnError = true): Record<string, unknown> {
   }
 }
 
-async function loadProfiles() {
-  ;[profiles.value, services.value] = await Promise.all([api<Profile[]>('/profiles'), api<LlamaService[]>('/services')])
-  if (!serviceId.value && services.value.length) {
-    serviceId.value = services.value[0].id
-    modelAlias.value = services.value[0].models.find((item) => item.enabled)?.alias || ''
+async function loadServices() {
+  services.value = await api<LlamaService[]>('/services')
+  if (!serviceId.value) {
+    const first = services.value.find((service) => service.applied_launch_config)
+    if (first) {
+      serviceId.value = first.id
+      modelAlias.value = first.applied_model_aliases[0] || ''
+    }
   }
 }
 
@@ -89,7 +97,6 @@ async function run() {
         service_id: serviceId.value,
         model_alias: modelAlias.value,
         seed: seedText.value.trim() === '' ? null : Number(seedText.value),
-        profile_id: activeProfile.value?.id || null,
         stop: stopText.value.split('\n').map((item) => item.trim()).filter(Boolean),
         extra_params: safeExtra(),
       }),
@@ -113,23 +120,26 @@ function format(value: number | null | undefined, digits = 2) {
   return value == null ? 'N/A' : value.toFixed(digits)
 }
 
-onMounted(loadProfiles)
+onMounted(loadServices)
 onBeforeUnmount(() => timer && window.clearInterval(timer))
 </script>
 
 <template>
   <div class="benchmark-layout">
     <form class="page-stack" @submit.prevent="run">
-      <div v-if="!activeProfile" class="risk-banner neutral">
-        当前没有由 LlamaLens 激活的 Profile。测试仍可请求现有 llama-server，但结果不会关联配置快照。
+      <div v-if="selectedService && !selectedService.applied_launch_config" class="risk-banner neutral">
+        这个 Service 尚未成功部署，没有 applied 启动快照，因此不能运行 Benchmark。
+      </div>
+      <div v-else-if="!services.some((service) => service.applied_launch_config)" class="risk-banner neutral">
+        目前没有可测试的 Service。请先在 Services 页面导入 Profile 并成功部署。
       </div>
 
       <PageSection title="测试请求" description="Benchmark 参数不会写入 systemd service，也不会触发模型重启。">
         <div class="form-grid two-columns">
-          <label class="field"><span>目标 Service</span><select v-model="serviceId" required @change="modelAlias = serviceModels[0]?.alias || ''"><option value="" disabled>选择 Service</option><option v-for="service in services" :key="service.id" :value="service.id">{{ service.name }} · {{ service.host }}:{{ service.port }}</option></select></label>
+          <label class="field"><span>目标 Service</span><select v-model="serviceId" required @change="modelAlias = serviceModels[0]?.alias || ''"><option value="" disabled>选择 Service</option><option v-for="service in services" :key="service.id" :value="service.id" :disabled="!service.applied_launch_config">{{ service.name }} · {{ service.host }}:{{ service.port }}{{ service.applied_launch_config ? '' : '（未部署）' }}</option></select></label>
           <label class="field"><span>模型 Alias</span><select v-model="modelAlias" required><option value="" disabled>选择模型</option><option v-for="model in serviceModels" :key="model.alias" :value="model.alias">{{ model.display_name || model.alias }}</option></select></label>
           <label class="field"><span>测试名称</span><input v-model="form.name" required /></label>
-          <label class="field"><span>当前 Profile</span><input :value="activeProfile?.name || '未关联'" disabled /></label>
+          <label class="field"><span>已应用启动配置</span><input :value="selectedService?.applied_launch_config ? `${selectedService.applied_launch_config.mode} · ${selectedService.applied_model_aliases.join(', ')}` : '无 applied 快照'" disabled /></label>
         </div>
         <label class="field"><span>Prompt</span><textarea v-model="form.prompt" class="prompt-input" required placeholder="输入要测试的完整 Prompt" /></label>
       </PageSection>
@@ -157,7 +167,7 @@ onBeforeUnmount(() => timer && window.clearInterval(timer))
 
       <div class="sticky-actions">
         <button type="button" class="button secondary" :disabled="!current || !running" @click="cancel"><IconPlayerStop :size="17" />取消</button>
-        <button class="button primary" :disabled="running"><IconPlayerPlay :size="17" />开始测试</button>
+        <button class="button primary" :disabled="running || !selectedService?.applied_launch_config || !modelAlias"><IconPlayerPlay :size="17" />开始测试</button>
       </div>
     </form>
 

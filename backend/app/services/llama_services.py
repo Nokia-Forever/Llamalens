@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -8,11 +9,12 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import LlamaService, Profile, ServiceModel
-from app.schemas import AppSettings, LlamaServiceCreate
+from app.models import LlamaService, Profile, ProfileModel
+from app.schemas import AppSettings, LaunchConfig, LlamaServiceCreate
+from app.services.profiles_service import build_launch_argv, launch_config_from_profile, normalize_launch_config
 from app.services.systemd import daemon_reload, read_unit_journal, run_unit_action
 
 
@@ -71,45 +73,38 @@ def _extra_lines(section: str, text: str) -> list[str]:
     return result
 
 
-def build_argv(payload: LlamaServiceCreate) -> list[str]:
-    if "\x00" in payload.custom_args_text:
-        raise ValueError("llama-server 自定义参数不能包含 NUL")
-    argv = [payload.server_bin]
-    if payload.mode == "single":
-        if not payload.model_path.strip():
-            raise ValueError("单模型服务必须设置模型路径")
-        if not payload.model_alias.strip():
-            raise ValueError("单模型服务必须设置模型 alias")
-        argv.extend(["--model", payload.model_path, "--alias", payload.model_alias])
-    else:
-        if not payload.models_dir.strip():
-            raise ValueError("Router 服务必须设置 models directory")
-        enabled_models = [model for model in payload.models if model.enabled]
-        if not enabled_models:
-            raise ValueError("Router 服务至少需要一个可选模型 alias")
-        aliases = [model.alias for model in enabled_models]
-        if len(aliases) != len(set(aliases)):
-            raise ValueError("同一服务中的模型 alias 不能重复")
-        argv.extend(["--models-dir", payload.models_dir])
-        if payload.models_preset.strip():
-            argv.extend(["--models-preset", payload.models_preset])
-        argv.extend(["--models-max", str(payload.models_max)])
-        if payload.models_autoload:
-            argv.append("--models-autoload")
-    argv.extend(["--host", payload.host, "--port", str(payload.port)])
-    if payload.custom_args_text.strip():
-        argv.extend(shlex.split(payload.custom_args_text, posix=True))
-    return argv
+def _decode_launch(value: str) -> LaunchConfig | None:
+    if not value:
+        return None
+    return LaunchConfig.model_validate_json(value)
 
 
-def render_unit(
-    payload: LlamaServiceCreate,
-    unit_name: str | None = None,
-    argv_override: list[str] | None = None,
-) -> dict[str, object]:
+def launch_aliases(config: LaunchConfig | None) -> list[str]:
+    if config is None:
+        return []
+    if config.mode == "single":
+        return [config.model_alias]
+    return [item.alias for item in config.models if item.enabled]
+
+
+def app_settings_for_service(row: LlamaService, base: AppSettings | None = None) -> AppSettings:
+    settings = base.model_copy(deep=True) if base is not None else AppSettings()
+    settings.llama_server_bin = row.server_bin
+    settings.llama_service_name = row.unit_name
+    settings.llama_service_file = row.unit_path
+    settings.service_scope = "system"
+    settings.service_control_command = "systemctl"
+    settings.llama_host = row.host
+    settings.llama_port = row.port
+    settings.health_path = row.health_path
+    settings.request_path = row.request_path
+    settings.active_profile_path = str(Path(os.getenv("LLAMALENS_DATA_DIR", "/var/lib/llama-lens")) / "services" / row.id / "active-profile.json")
+    return settings
+
+
+def render_unit(payload: LlamaServiceCreate, argv: list[str], unit_name: str | None = None) -> dict[str, object]:
     normalized_name = normalize_unit_name(payload.name, unit_name if unit_name is not None else payload.unit_name)
-    argv = argv_override or build_argv(payload)
-    unit_lines = [
+    lines = [
         "[Unit]",
         f"Description={payload.description.strip() or payload.name}",
         "Wants=network-online.target",
@@ -131,7 +126,28 @@ def render_unit(
         *_extra_lines("Install", payload.install_extra_text),
         "",
     ]
-    return {"unit_name": normalized_name, "unit_path": str(unit_path_for(normalized_name)), "argv": argv, "content": "\n".join(unit_lines)}
+    return {"unit_name": normalized_name, "unit_path": str(unit_path_for(normalized_name)), "argv": argv, "content": "\n".join(lines)}
+
+
+def payload_for_service(row: LlamaService) -> LlamaServiceCreate:
+    return LlamaServiceCreate(
+        name=row.name, description=row.description, unit_name=row.unit_name, server_bin=row.server_bin,
+        service_user=row.service_user, service_group=row.service_group, working_directory=row.working_directory,
+        host=row.host, port=row.port, health_path=row.health_path, request_path=row.request_path,
+        unit_extra_text=row.unit_extra_text, service_extra_text=row.service_extra_text,
+        install_extra_text=row.install_extra_text,
+    )
+
+
+def preview_service(db: Session, row: LlamaService, settings: AppSettings) -> dict[str, object]:
+    config = _decode_launch(row.draft_launch_config_json)
+    if config is None:
+        raise ValueError("请先从 Profile 导入启动配置")
+    built = build_launch_argv(db, app_settings_for_service(row, settings), config)
+    rendered = render_unit(payload_for_service(row), built.argv, row.unit_name)
+    rendered["warnings"] = built.warnings
+    rendered["launch_config"] = config.model_dump(mode="json")
+    return rendered
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -148,11 +164,11 @@ def _atomic_write(path: Path, content: str) -> None:
             os.unlink(temp_name)
 
 
-def _assign(row: LlamaService, payload: LlamaServiceCreate, rendered: dict[str, object]) -> None:
+def _assign(row: LlamaService, payload: LlamaServiceCreate, unit_name: str) -> None:
     row.name = payload.name
     row.description = payload.description
-    row.unit_name = str(rendered["unit_name"])
-    row.unit_path = str(rendered["unit_path"])
+    row.unit_name = unit_name
+    row.unit_path = str(unit_path_for(unit_name))
     row.server_bin = payload.server_bin
     row.service_user = payload.service_user
     row.service_group = payload.service_group
@@ -161,70 +177,38 @@ def _assign(row: LlamaService, payload: LlamaServiceCreate, rendered: dict[str, 
     row.port = payload.port
     row.health_path = payload.health_path
     row.request_path = payload.request_path
-    row.mode = payload.mode
-    row.model_path = payload.model_path
-    row.model_alias = payload.model_alias
-    row.models_dir = payload.models_dir
-    row.models_preset = payload.models_preset
-    row.models_max = payload.models_max
-    row.models_autoload = payload.models_autoload
-    row.custom_args_text = payload.custom_args_text
     row.unit_extra_text = payload.unit_extra_text
     row.service_extra_text = payload.service_extra_text
     row.install_extra_text = payload.install_extra_text
-    row.rendered_unit = str(rendered["content"])
-
-
-def _replace_models(row: LlamaService, payload: LlamaServiceCreate) -> None:
-    row.models.clear()
-    if payload.mode == "single":
-        row.models.append(ServiceModel(id=str(uuid.uuid4()), alias=payload.model_alias, model_path=payload.model_path, display_name=payload.model_alias))
-    else:
-        for item in payload.models:
-            row.models.append(ServiceModel(id=str(uuid.uuid4()), **item.model_dump()))
 
 
 def serialize_service(row: LlamaService, status: bool = False) -> dict[str, object]:
+    draft = _decode_launch(row.draft_launch_config_json)
+    applied = _decode_launch(row.applied_launch_config_json)
+    current_service_config = payload_for_service(row).model_dump(mode="json")
+    applied_service_config = json.loads(row.applied_service_config_json) if row.applied_service_config_json else None
     result: dict[str, object] = {
         "id": row.id, "name": row.name, "description": row.description, "unit_name": row.unit_name,
         "unit_path": row.unit_path, "server_bin": row.server_bin, "service_user": row.service_user,
         "service_group": row.service_group, "working_directory": row.working_directory, "host": row.host,
-        "port": row.port, "health_path": row.health_path, "request_path": row.request_path, "mode": row.mode,
-        "model_path": row.model_path, "model_alias": row.model_alias, "models_dir": row.models_dir,
-        "models_preset": row.models_preset, "models_max": row.models_max, "models_autoload": row.models_autoload,
-        "custom_args_text": row.custom_args_text, "unit_extra_text": row.unit_extra_text,
-        "service_extra_text": row.service_extra_text, "install_extra_text": row.install_extra_text,
-        "rendered_unit": row.rendered_unit, "archived_at": row.archived_at, "created_at": row.created_at,
-        "updated_at": row.updated_at,
-        "models": [{"id": item.id, "alias": item.alias, "model_path": item.model_path, "display_name": item.display_name, "enabled": item.enabled} for item in row.models],
+        "port": row.port, "health_path": row.health_path, "request_path": row.request_path,
+        "unit_extra_text": row.unit_extra_text, "service_extra_text": row.service_extra_text,
+        "install_extra_text": row.install_extra_text, "rendered_unit": row.rendered_unit,
+        "source_profile_id": row.source_profile_id,
+        "applied_source_profile_id": row.applied_source_profile_id,
+        "draft_launch_config": draft.model_dump(mode="json") if draft else None,
+        "applied_launch_config": applied.model_dump(mode="json") if applied else None,
+        "applied_service_config": applied_service_config,
+        "applied_model_aliases": launch_aliases(applied),
+        "has_pending_changes": (
+            row.draft_launch_config_json != row.applied_launch_config_json
+            or (applied is not None and current_service_config != applied_service_config)
+        ),
+        "archived_at": row.archived_at, "created_at": row.created_at, "updated_at": row.updated_at,
     }
     if status:
         result["status"] = run_unit_action(row.unit_name, "status").__dict__
     return result
-
-
-def app_settings_for_service(row: LlamaService, base: AppSettings | None = None) -> AppSettings:
-    settings = base.model_copy(deep=True) if base is not None else AppSettings()
-    settings.llama_server_bin = row.server_bin
-    settings.llama_service_name = row.unit_name
-    settings.llama_service_file = row.unit_path
-    settings.service_scope = "system"
-    settings.service_control_command = "systemctl"
-    settings.llama_host = row.host
-    settings.llama_port = row.port
-    settings.health_path = row.health_path
-    settings.request_path = row.request_path
-    settings.active_profile_path = str(
-        Path(os.getenv("LLAMALENS_DATA_DIR", "/var/lib/llama-lens"))
-        / "services"
-        / row.id
-        / "active-profile.json"
-    )
-    return settings
-
-
-def payload_for_service(row: LlamaService) -> LlamaServiceCreate:
-    return LlamaServiceCreate.model_validate(serialize_service(row))
 
 
 def create_service(db: Session, payload: LlamaServiceCreate) -> LlamaService:
@@ -233,45 +217,11 @@ def create_service(db: Session, payload: LlamaServiceCreate) -> LlamaService:
         raise ValueError("unit 名称已经存在")
     if db.scalar(select(LlamaService.id).where(LlamaService.host == payload.host, LlamaService.port == payload.port, LlamaService.archived_at.is_(None)).limit(1)):
         raise ValueError("该 host/port 已被另一个服务使用")
-    rendered = render_unit(payload, unit_name)
     row = LlamaService(id=str(uuid.uuid4()))
-    _assign(row, payload, rendered)
-    _replace_models(row, payload)
+    _assign(row, payload, unit_name)
     db.add(row)
     db.commit()
     db.refresh(row)
-    return row
-
-
-def migrate_legacy_service(db: Session, settings: AppSettings) -> LlamaService | None:
-    """Create one managed service for V1 databases that already contain Profiles."""
-    if db.scalar(select(LlamaService.id).limit(1)) is not None:
-        return None
-    profile = db.scalar(select(Profile).order_by(Profile.is_active.desc(), Profile.created_at.asc()).limit(1))
-    if profile is None:
-        return None
-    alias = (profile.model_alias or _slug(profile.name)).replace(" ", "-")
-    payload = LlamaServiceCreate(
-        name="Legacy llama.cpp service",
-        description="Migrated from LlamaLens V1 settings",
-        unit_name="llamalens-legacy.service",
-        server_bin=settings.llama_server_bin,
-        working_directory=str(Path(settings.llama_server_bin).parent),
-        host=settings.llama_host,
-        port=settings.llama_port,
-        health_path=settings.health_path,
-        request_path=settings.request_path,
-        mode="single",
-        model_path=profile.model_path,
-        model_alias=alias,
-        custom_args_text=profile.custom_args_text,
-    )
-    row = create_service(db, payload)
-    for existing in db.scalars(select(Profile).where(Profile.service_id.is_(None))).all():
-        existing.service_id = row.id
-        if not existing.model_alias:
-            existing.model_alias = alias
-    db.commit()
     return row
 
 
@@ -281,33 +231,46 @@ def update_service(db: Session, row: LlamaService, payload: LlamaServiceCreate) 
     conflict = db.scalar(select(LlamaService.id).where(LlamaService.id != row.id, LlamaService.host == payload.host, LlamaService.port == payload.port, LlamaService.archived_at.is_(None)).limit(1))
     if conflict:
         raise ValueError("该 host/port 已被另一个服务使用")
-    rendered = render_unit(payload, row.unit_name)
-    _assign(row, payload, rendered)
-    _replace_models(row, payload)
+    _assign(row, payload, row.unit_name)
     db.commit()
     db.refresh(row)
     return row
 
 
-def deploy_service(row: LlamaService) -> dict[str, object]:
-    rendered = render_unit(payload_for_service(row), row.unit_name)
-    return deploy_unit_content(row, str(rendered["content"]), enable_now=True)
+def select_profile(db: Session, row: LlamaService, profile: Profile) -> LlamaService:
+    config = launch_config_from_profile(profile)
+    row.source_profile_id = profile.id
+    row.draft_launch_config_json = config.model_dump_json()
+    db.commit()
+    db.refresh(row)
+    return row
 
 
-def deploy_unit_content(row: LlamaService, content: str, enable_now: bool = False) -> dict[str, object]:
+def update_launch_config(db: Session, row: LlamaService, settings: AppSettings, payload: LaunchConfig) -> LlamaService:
+    config = normalize_launch_config(settings, payload)
+    row.draft_launch_config_json = config.model_dump_json()
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def deploy_service(db: Session, row: LlamaService, settings: AppSettings) -> dict[str, object]:
+    rendered = preview_service(db, row, settings)
     path = unit_path_for(row.unit_name)
-    _atomic_write(path, content)
+    _atomic_write(path, str(rendered["content"]))
     reload_result = daemon_reload()
     if not reload_result.ok:
         return {"ok": False, "reload": reload_result.__dict__}
-    action_result = run_unit_action(row.unit_name, "enable-now" if enable_now else "restart", timeout=120)
+    action_result = run_unit_action(row.unit_name, "enable-now", timeout=120)
     status_result = run_unit_action(row.unit_name, "status")
-    return {
-        "ok": reload_result.ok and action_result.ok,
-        "reload": reload_result.__dict__,
-        "action": action_result.__dict__,
-        "status": status_result.__dict__,
-    }
+    ok = reload_result.ok and action_result.ok
+    if ok:
+        row.rendered_unit = str(rendered["content"])
+        row.applied_launch_config_json = row.draft_launch_config_json
+        row.applied_service_config_json = payload_for_service(row).model_dump_json()
+        row.applied_source_profile_id = row.source_profile_id
+        db.commit()
+    return {"ok": ok, "reload": reload_result.__dict__, "action": action_result.__dict__, "status": status_result.__dict__}
 
 
 def archive_service(db: Session, row: LlamaService) -> dict[str, object]:
@@ -330,7 +293,7 @@ def restore_service(db: Session, row: LlamaService) -> dict[str, object]:
     if archived_path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         os.replace(archived_path, path)
-    else:
+    elif row.rendered_unit:
         _atomic_write(path, row.rendered_unit)
     reload_result = daemon_reload()
     row.archived_at = None
@@ -348,7 +311,6 @@ def delete_service(db: Session, row: LlamaService) -> dict[str, object]:
     if archived_path.exists():
         archived_path.unlink()
     reload_result = daemon_reload()
-    db.execute(Profile.__table__.update().where(Profile.service_id == row.id).values(service_id=None))
     db.delete(row)
     db.commit()
     return {"ok": stop.ok and disable.ok and reload_result.ok, "stop": stop.__dict__, "disable": disable.__dict__, "reload": reload_result.__dict__}
@@ -356,3 +318,82 @@ def delete_service(db: Session, row: LlamaService) -> dict[str, object]:
 
 def service_logs(row: LlamaService, lines: int) -> dict[str, object]:
     return read_unit_journal(row.unit_name, lines).__dict__
+
+
+def _legacy_launch_config(service: LlamaService) -> LaunchConfig | None:
+    if service.mode == "router" and service.models_dir:
+        return LaunchConfig(
+            mode="router", models_dir=service.models_dir, models_preset=service.models_preset,
+            models_max=service.models_max, models_autoload=service.models_autoload,
+            models=[{"alias": item.alias, "model_path": item.model_path, "display_name": item.display_name, "enabled": item.enabled} for item in service.models],
+            custom_args_text=service.custom_args_text,
+        )
+    if service.model_path and service.model_alias:
+        return LaunchConfig(mode="single", model_path=service.model_path, model_alias=service.model_alias, custom_args_text=service.custom_args_text)
+    return None
+
+
+def _create_migrated_profile(db: Session, service: LlamaService, config: LaunchConfig) -> Profile:
+    profile = Profile(
+        id=str(uuid.uuid4()), name=f"{service.name} migrated profile", service_id=None, is_active=False,
+        mode=config.mode, model_path=config.model_path, model_alias=config.model_alias,
+        models_dir=config.models_dir, models_preset=config.models_preset,
+        models_max=config.models_max, models_autoload=config.models_autoload,
+        catalog_args_json=json.dumps([item.model_dump() for item in config.catalog_args], ensure_ascii=False),
+        custom_args_text=config.custom_args_text, labels_json=json.dumps(config.labels, ensure_ascii=False),
+    )
+    for item in config.models:
+        profile.models.append(ProfileModel(id=str(uuid.uuid4()), **item.model_dump()))
+    db.add(profile)
+    db.flush()
+    return profile
+
+
+def migrate_legacy_service(db: Session, settings: AppSettings) -> LlamaService | None:
+    services = db.scalars(select(LlamaService)).all()
+    if not services:
+        profile = db.scalar(select(Profile).order_by(Profile.is_active.desc(), Profile.created_at.asc()).limit(1))
+        if profile is None:
+            return None
+        row = LlamaService(id=str(uuid.uuid4()))
+        payload = LlamaServiceCreate(
+            name="Legacy llama.cpp service", description="Migrated from LlamaLens V1 settings",
+            unit_name="llamalens-legacy.service", server_bin=settings.llama_server_bin,
+            working_directory=str(Path(settings.llama_server_bin).parent), host=settings.llama_host,
+            port=settings.llama_port, health_path=settings.health_path, request_path=settings.request_path,
+        )
+        _assign(row, payload, payload.unit_name)
+        db.add(row)
+        db.flush()
+        services = [row]
+
+    for service in services:
+        if service.draft_launch_config_json:
+            if service.applied_launch_config_json and not service.applied_service_config_json:
+                service.applied_service_config_json = payload_for_service(service).model_dump_json()
+            if service.applied_launch_config_json and not service.applied_source_profile_id:
+                service.applied_source_profile_id = service.source_profile_id
+            continue
+        profile = db.scalar(
+            select(Profile)
+            .where(Profile.service_id == service.id)
+            .order_by(Profile.is_active.desc(), Profile.updated_at.desc())
+            .limit(1)
+        )
+        if profile is not None:
+            config = launch_config_from_profile(profile)
+        else:
+            config = _legacy_launch_config(service)
+            if config is None:
+                continue
+            profile = _create_migrated_profile(db, service, config)
+        service.source_profile_id = profile.id
+        service.draft_launch_config_json = config.model_dump_json()
+        if Path(service.unit_path).is_file() and service.rendered_unit:
+            service.applied_launch_config_json = service.draft_launch_config_json
+            service.applied_service_config_json = payload_for_service(service).model_dump_json()
+            service.applied_source_profile_id = service.source_profile_id
+
+    db.execute(update(Profile).values(service_id=None, is_active=False))
+    db.commit()
+    return services[0] if services else None

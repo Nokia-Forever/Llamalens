@@ -6,21 +6,27 @@ import MetricBlock from '../components/MetricBlock.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
-import type { BenchmarkJob, LlamaService } from '../types'
+import type { BenchmarkJob, LlamaService, Profile } from '../types'
 
 const store = useAppStore()
 const services = ref<LlamaService[]>([])
+const profiles = ref<Profile[]>([])
 const benchmarks = ref<BenchmarkJob[]>([])
 const loading = ref(true)
 const actingId = ref<string | null>(null)
 const healthyCount = computed(() => services.value.filter((item) => item.status?.ok).length)
-const modelCount = computed(() => services.value.reduce((total, item) => total + item.models.filter((model) => model.enabled).length, 0))
+const modelCount = computed(() => services.value.reduce((total, item) => total + item.applied_model_aliases.length, 0))
+
+function profileName(id: string | null) {
+  if (!id) return '本地/无来源'
+  return profiles.value.find((profile) => profile.id === id)?.name || '历史 Profile'
+}
 
 async function load() {
   loading.value = true
   try {
-    ;[services.value, benchmarks.value] = await Promise.all([
-      api<LlamaService[]>('/services?with_status=true'), api<BenchmarkJob[]>('/benchmarks'),
+    ;[services.value, benchmarks.value, profiles.value] = await Promise.all([
+      api<LlamaService[]>('/services?with_status=true'), api<BenchmarkJob[]>('/benchmarks'), api<Profile[]>('/profiles'),
     ])
   } catch (error) { store.notify('error', error instanceof Error ? error.message : '加载概览失败') }
   finally { loading.value = false }
@@ -48,7 +54,7 @@ onMounted(load)
       <MetricBlock label="Recent tests" :value="String(Math.min(benchmarks.length, 5))" />
     </div>
 
-    <PageSection title="Llama Services" description="每个服务都使用独立的 unit、端口和模型配置。">
+    <PageSection title="Llama Services" description="每个服务拥有独立 unit、端口和已应用启动快照；Profile 只作为可复制模板。">
       <div v-if="!services.length" class="empty-state">
         还没有服务。<RouterLink to="/services">创建第一个 Llama Service</RouterLink>
       </div>
@@ -57,10 +63,12 @@ onMounted(load)
           <div>
             <span class="service-kicker"><IconServer :size="17" /> {{ service.unit_name }}</span>
             <h2>{{ service.name }}</h2>
-            <p>{{ service.host }}:{{ service.port }} · {{ service.mode }} · {{ service.models.map((item) => item.alias).join(', ') }}</p>
+            <p>{{ service.host }}:{{ service.port }} · {{ service.applied_launch_config?.mode || '未部署' }} · {{ service.applied_model_aliases.join(', ') || '无 applied alias' }}</p>
+            <small class="service-profile-source">已应用来源：{{ profileName(service.applied_source_profile_id) }}</small>
           </div>
           <div class="service-controls">
             <StatusBadge :status="service.status?.ok ? 'healthy' : 'inactive'" />
+            <StatusBadge v-if="service.has_pending_changes" status="pending" label="有未部署修改" />
             <button class="button secondary" :disabled="actingId === service.id" @click="action(service, 'start')"><IconPlayerPlay :size="17" />启动</button>
             <button class="button primary" :disabled="actingId === service.id" @click="action(service, 'restart')"><IconRefresh :size="17" />重启</button>
           </div>

@@ -91,6 +91,11 @@ class LlamaService(Base):
     service_extra_text: Mapped[str] = mapped_column(Text, default="")
     install_extra_text: Mapped[str] = mapped_column(Text, default="")
     rendered_unit: Mapped[str] = mapped_column(Text, default="")
+    source_profile_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    applied_source_profile_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    draft_launch_config_json: Mapped[str] = mapped_column(Text, default="")
+    applied_launch_config_json: Mapped[str] = mapped_column(Text, default="")
+    applied_service_config_json: Mapped[str] = mapped_column(Text, default="")
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -115,6 +120,11 @@ class Profile(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     service_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     model_alias: Mapped[str] = mapped_column(String(200), default="")
+    mode: Mapped[str] = mapped_column(String(32), default="single")
+    models_dir: Mapped[str] = mapped_column(Text, default="")
+    models_preset: Mapped[str] = mapped_column(Text, default="")
+    models_max: Mapped[int] = mapped_column(Integer, default=0)
+    models_autoload: Mapped[bool] = mapped_column(Boolean, default=False)
     name: Mapped[str] = mapped_column(String(200), index=True)
     model_path: Mapped[str] = mapped_column(Text)
     catalog_args_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -124,6 +134,19 @@ class Profile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     versions: Mapped[list["ProfileVersion"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+    models: Mapped[list["ProfileModel"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+
+
+class ProfileModel(Base):
+    __tablename__ = "profile_models"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    alias: Mapped[str] = mapped_column(String(200), index=True)
+    model_path: Mapped[str] = mapped_column(Text, default="")
+    display_name: Mapped[str] = mapped_column(String(300), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    profile: Mapped[Profile] = relationship(back_populates="models")
 
 
 class ProfileVersion(Base):

@@ -58,6 +58,35 @@ def _migrate_legacy_columns() -> None:
         if "model_alias" not in profile_columns:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE profiles ADD COLUMN model_alias VARCHAR(200) DEFAULT ''"))
+        profile_additions = {
+            "mode": "ALTER TABLE profiles ADD COLUMN mode VARCHAR(32) DEFAULT 'single'",
+            "models_dir": "ALTER TABLE profiles ADD COLUMN models_dir TEXT DEFAULT ''",
+            "models_preset": "ALTER TABLE profiles ADD COLUMN models_preset TEXT DEFAULT ''",
+            "models_max": "ALTER TABLE profiles ADD COLUMN models_max INTEGER DEFAULT 0",
+            "models_autoload": "ALTER TABLE profiles ADD COLUMN models_autoload BOOLEAN DEFAULT 0",
+        }
+        missing_profile_additions = [statement for name, statement in profile_additions.items() if name not in profile_columns]
+        if missing_profile_additions:
+            with engine.begin() as connection:
+                for statement in missing_profile_additions:
+                    connection.execute(text(statement))
+    inspector = inspect(engine)
+    if "llama_services" in inspector.get_table_names():
+        service_columns = {column["name"] for column in inspector.get_columns("llama_services")}
+        service_additions = {
+            "source_profile_id": "ALTER TABLE llama_services ADD COLUMN source_profile_id VARCHAR(36)",
+            "applied_source_profile_id": "ALTER TABLE llama_services ADD COLUMN applied_source_profile_id VARCHAR(36)",
+            "draft_launch_config_json": "ALTER TABLE llama_services ADD COLUMN draft_launch_config_json TEXT DEFAULT ''",
+            "applied_launch_config_json": "ALTER TABLE llama_services ADD COLUMN applied_launch_config_json TEXT DEFAULT ''",
+            "applied_service_config_json": "ALTER TABLE llama_services ADD COLUMN applied_service_config_json TEXT DEFAULT ''",
+        }
+        missing_service_additions = [statement for name, statement in service_additions.items() if name not in service_columns]
+        if missing_service_additions:
+            with engine.begin() as connection:
+                for statement in missing_service_additions:
+                    connection.execute(text(statement))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_llama_services_source_profile_id ON llama_services (source_profile_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_llama_services_applied_source_profile_id ON llama_services (applied_source_profile_id)"))
     inspector = inspect(engine)
     if "benchmark_jobs" in inspector.get_table_names():
         benchmark_columns = {column["name"] for column in inspector.get_columns("benchmark_jobs")}
