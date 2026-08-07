@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import ArgumentCatalog, Profile, ProfileVersion
+from app.models import ArgumentCatalog, LlamaService, Profile, ProfileVersion
 from app.schemas import AppSettings, CatalogArgumentInput, ProfileCreate, ProfileOut
 from app.services.arguments import build_profile_argv
 
@@ -59,12 +59,21 @@ def atomic_write_text(path: Path, content: str) -> None:
 
 
 def create_profile(db: Session, settings: AppSettings, payload: ProfileCreate) -> Profile:
+    service = db.get(LlamaService, payload.service_id) if payload.service_id else None
+    if payload.service_id and service is None:
+        raise ValueError("目标服务不存在")
+    if service is not None:
+        from app.services.llama_services import app_settings_for_service
+
+        settings = app_settings_for_service(service, settings)
     model_path = _ensure_model_allowed(payload.model_path, settings)
     build_profile_argv(
         settings, model_path, payload.catalog_args, payload.custom_args_text, known_flags(db), canonical_flags(db)
     )
     profile = Profile(
         id=str(uuid.uuid4()),
+        service_id=payload.service_id,
+        model_alias=payload.model_alias or (service.model_alias if service is not None else ""),
         name=payload.name,
         model_path=model_path,
         catalog_args_json=json.dumps([item.model_dump() for item in payload.catalog_args], ensure_ascii=False),
@@ -78,10 +87,19 @@ def create_profile(db: Session, settings: AppSettings, payload: ProfileCreate) -
 
 
 def update_profile(db: Session, settings: AppSettings, profile: Profile, payload: ProfileCreate) -> Profile:
+    service = db.get(LlamaService, payload.service_id) if payload.service_id else None
+    if payload.service_id and service is None:
+        raise ValueError("目标服务不存在")
+    if service is not None:
+        from app.services.llama_services import app_settings_for_service
+
+        settings = app_settings_for_service(service, settings)
     model_path = _ensure_model_allowed(payload.model_path, settings)
     build_profile_argv(
         settings, model_path, payload.catalog_args, payload.custom_args_text, known_flags(db), canonical_flags(db)
     )
+    profile.service_id = payload.service_id
+    profile.model_alias = payload.model_alias or (service.model_alias if service is not None else "")
     profile.name = payload.name
     profile.model_path = model_path
     profile.catalog_args_json = json.dumps([item.model_dump() for item in payload.catalog_args], ensure_ascii=False)
@@ -93,12 +111,19 @@ def update_profile(db: Session, settings: AppSettings, profile: Profile, payload
 
 
 def serialize_profile(db: Session, settings: AppSettings, profile: Profile) -> ProfileOut:
+    service = db.get(LlamaService, profile.service_id) if profile.service_id else None
+    if service is not None:
+        from app.services.llama_services import app_settings_for_service
+
+        settings = app_settings_for_service(service, settings)
     catalog_args = [CatalogArgumentInput.model_validate(item) for item in json.loads(profile.catalog_args_json)]
     built = build_profile_argv(
         settings, profile.model_path, catalog_args, profile.custom_args_text, known_flags(db), canonical_flags(db)
     )
     return ProfileOut(
         id=profile.id,
+        service_id=profile.service_id,
+        model_alias=profile.model_alias,
         name=profile.name,
         model_path=profile.model_path,
         catalog_args=catalog_args,
@@ -133,7 +158,10 @@ def write_active_profile(db: Session, settings: AppSettings, profile: Profile, b
         indent=2,
     )
     atomic_write_text(active_path, content)
-    db.execute(update(Profile).values(is_active=False))
+    if profile.service_id is None:
+        db.execute(update(Profile).where(Profile.service_id.is_(None)).values(is_active=False))
+    else:
+        db.execute(update(Profile).where(Profile.service_id == profile.service_id).values(is_active=False))
     profile.is_active = True
     db.add(version)
     db.commit()

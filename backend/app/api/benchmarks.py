@@ -17,6 +17,8 @@ def _serialize(job: BenchmarkJob, include_attempts: bool = False):
     result = {
         "id": job.id,
         "name": job.name,
+        "service_id": job.service_id,
+        "model_alias": job.model_alias,
         "profile_id": job.profile_id,
         "status": job.status,
         "config": json.loads(job.config_json),

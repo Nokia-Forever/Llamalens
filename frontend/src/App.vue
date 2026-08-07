@@ -8,6 +8,7 @@ import {
   IconChartHistogram,
   IconGauge,
   IconMoon,
+  IconServer,
   IconSettings,
 } from '@tabler/icons-vue'
 import { useAppStore } from './stores/app'
@@ -17,6 +18,7 @@ const store = useAppStore()
 const title = computed(() => String(route.meta.title || 'LlamaLens'))
 const nav = [
   { to: '/', label: '概览', icon: IconGauge },
+  { to: '/services', label: 'Services', icon: IconServer },
   { to: '/models', label: '模型库', icon: IconBox },
   { to: '/profiles', label: 'Profiles', icon: IconAdjustments },
   { to: '/benchmark', label: 'Benchmark', icon: IconActivity },
@@ -32,10 +34,7 @@ onMounted(() => store.applyTheme())
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">LL</div>
-        <div>
-          <strong>LlamaLens</strong>
-          <span>llama.cpp console</span>
-        </div>
+        <div><strong>LlamaLens</strong><span>llama.cpp console</span></div>
       </div>
       <nav class="main-nav" aria-label="主导航">
         <RouterLink v-for="item in nav" :key="item.to" :to="item.to">
@@ -44,25 +43,17 @@ onMounted(() => store.applyTheme())
         </RouterLink>
       </nav>
       <button class="theme-button" type="button" @click="store.cycleTheme">
-        <IconMoon :size="18" :stroke-width="1.8" />
-        主题: {{ store.theme }}
+        <IconMoon :size="18" :stroke-width="1.8" />主题: {{ store.theme }}
       </button>
     </aside>
 
     <main class="main-area">
-      <header class="topbar">
-        <h1>{{ title }}</h1>
-        <div class="topbar-note">本机控制台</div>
-      </header>
-      <div class="page-container">
-        <RouterView />
-      </div>
+      <header class="topbar"><h1>{{ title }}</h1><div class="topbar-note">本机控制台</div></header>
+      <div class="page-container"><RouterView /></div>
     </main>
 
     <div class="notice-stack" aria-live="polite">
-      <div v-for="notice in store.notices" :key="notice.id" class="notice" :class="`notice-${notice.type}`">
-        {{ notice.message }}
-      </div>
+      <div v-for="notice in store.notices" :key="notice.id" class="notice" :class="`notice-${notice.type}`">{{ notice.message }}</div>
     </div>
   </div>
 </template>

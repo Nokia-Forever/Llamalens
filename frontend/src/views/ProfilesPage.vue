@@ -5,19 +5,22 @@ import { api, jsonBody } from '../api'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
-import type { CatalogArgument, ModelFile, Profile, SelectedArgument } from '../types'
+import type { CatalogArgument, LlamaService, ModelFile, Profile, SelectedArgument } from '../types'
 
 const store = useAppStore()
 const profiles = ref<Profile[]>([])
+const services = ref<LlamaService[]>([])
 const models = ref<ModelFile[]>([])
 const catalog = ref<CatalogArgument[]>([])
 const selectedId = ref<string | null>(null)
 const search = ref('')
 const saving = ref(false)
 const switching = ref(false)
-const form = reactive({ name: '', model_path: '', catalog_args: [] as SelectedArgument[], custom_args_text: '', labels: {} as Record<string, string> })
+const form = reactive({ service_id: null as string | null, model_alias: '', name: '', model_path: '', catalog_args: [] as SelectedArgument[], custom_args_text: '', labels: {} as Record<string, string> })
 
 const selected = computed(() => profiles.value.find((profile) => profile.id === selectedId.value) || null)
+const selectedService = computed(() => services.value.find((service) => service.id === form.service_id) || null)
+const availableAliases = computed(() => selectedService.value?.models.filter((item) => item.enabled) || [])
 const filteredCatalog = computed(() => {
   const needle = search.value.trim().toLowerCase().replace(/(-{1,2})\s+/g, '$1')
   if (needle === '-') {
@@ -42,19 +45,19 @@ const duplicateFlags = computed(() => {
 })
 
 async function load() {
-  ;[profiles.value, models.value, catalog.value] = await Promise.all([
-    api<Profile[]>('/profiles'), api<ModelFile[]>('/models'), api<CatalogArgument[]>('/arguments?limit=1000'),
+  ;[profiles.value, models.value, catalog.value, services.value] = await Promise.all([
+    api<Profile[]>('/profiles'), api<ModelFile[]>('/models'), api<CatalogArgument[]>('/arguments?limit=1000'), api<LlamaService[]>('/services'),
   ])
   if (!selectedId.value && profiles.value.length) edit(profiles.value[0])
 }
 function reset() {
   selectedId.value = null
-  Object.assign(form, { name: '', model_path: models.value[0]?.path || '', catalog_args: [], custom_args_text: '', labels: {} })
+  Object.assign(form, { service_id: services.value[0]?.id || null, model_alias: services.value[0]?.models[0]?.alias || '', name: '', model_path: models.value[0]?.path || '', catalog_args: [], custom_args_text: '', labels: {} })
 }
 function edit(profile: Profile) {
   selectedId.value = profile.id
   Object.assign(form, {
-    name: profile.name, model_path: profile.model_path,
+    service_id: profile.service_id, model_alias: profile.model_alias, name: profile.name, model_path: profile.model_path,
     catalog_args: profile.catalog_args.map((item) => ({ ...item })), custom_args_text: profile.custom_args_text,
     labels: { ...profile.labels },
   })
@@ -141,6 +144,8 @@ onMounted(load)
 
       <PageSection title="必填信息">
         <div class="form-grid two-columns">
+          <label class="field"><span>目标 Service</span><select v-model="form.service_id" required><option :value="null" disabled>选择 Service</option><option v-for="service in services" :key="service.id" :value="service.id">{{ service.name }} · {{ service.host }}:{{ service.port }}</option></select></label>
+          <label class="field"><span>模型 Alias</span><select v-model="form.model_alias" required><option value="" disabled>选择 Alias</option><option v-for="model in availableAliases" :key="model.alias" :value="model.alias">{{ model.display_name || model.alias }}</option></select></label>
           <label class="field"><span>Profile 名称</span><input v-model="form.name" required /></label>
           <label class="field"><span>模型</span><select v-model="form.model_path" required><option value="" disabled>选择 GGUF</option><option v-for="model in models" :key="model.id" :value="model.path">{{ model.name }}</option></select></label>
         </div>

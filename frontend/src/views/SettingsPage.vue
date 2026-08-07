@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { IconDeviceFloppy, IconPlugConnected, IconPlus, IconTrash } from '@tabler/icons-vue'
+import { IconDeviceFloppy, IconPlus, IconTrash } from '@tabler/icons-vue'
 import { api, jsonBody } from '../api'
 import PageSection from '../components/PageSection.vue'
 import { useAppStore } from '../stores/app'
@@ -15,7 +15,6 @@ const form = reactive<AppSettings>({
 })
 const loading = ref(true)
 const saving = ref(false)
-const probe = ref<Record<string, unknown> | null>(null)
 const publicWarning = computed(() => form.web_host === '0.0.0.0' || form.web_host === '::')
 
 async function load() {
@@ -31,12 +30,6 @@ async function save() {
     store.notify('error', error instanceof Error ? error.message : '保存失败')
   } finally { saving.value = false }
 }
-async function testConnection() {
-  try {
-    probe.value = await api<Record<string, unknown>>('/settings/probe')
-    store.notify('info', '探测完成，请查看结果')
-  } catch (error) { store.notify('error', error instanceof Error ? error.message : '探测失败') }
-}
 function addRoot() { form.model_roots.push('') }
 function removeRoot(index: number) { form.model_roots.splice(index, 1) }
 onMounted(load)
@@ -49,17 +42,6 @@ onMounted(load)
       当前 Web 将监听所有网卡，V1 没有登录验证。任何能访问端口的人都可能操作模型和 service。
     </div>
 
-    <PageSection title="llama.cpp 服务" description="LlamaLens 只记录和控制用户已经创建的 systemd service。">
-      <div class="form-grid two-columns">
-        <label class="field"><span>Service 名称</span><input v-model="form.llama_service_name" required /><small>例如 llama-server.service</small></label>
-        <label class="field"><span>Unit 文件位置</span><input v-model="form.llama_service_file" required /></label>
-        <label class="field"><span>Systemd 范围</span><select v-model="form.service_scope"><option value="system">system</option><option value="user">user</option></select></label>
-        <label class="field"><span>控制命令</span><input v-model="form.service_control_command" :disabled="form.service_scope === 'user'" /><small>程序不保存 sudo 密码。</small></label>
-        <label class="field"><span>llama-server 路径</span><input v-model="form.llama_server_bin" required /></label>
-        <label class="field"><span>活动 Profile 文件</span><input v-model="form.active_profile_path" required /></label>
-      </div>
-    </PageSection>
-
     <PageSection title="模型目录" description="扫描和下载都限制在这些目录中。">
       <div class="path-list">
         <div v-for="(_, index) in form.model_roots" :key="index" class="path-row">
@@ -70,21 +52,15 @@ onMounted(load)
       </div>
     </PageSection>
 
-    <PageSection title="网络" description="Web Host/Port 是管理页面地址；llama-server Host/Port 会写入每个 Profile 的启动命令，并供健康检查和 Benchmark 使用。">
+    <PageSection title="管理页面网络" description="每个 llama-server 的 host、port 和 API 路径请在 Services 页面独立设置。">
       <div class="form-grid four-columns">
         <label class="field"><span>Web Host</span><input v-model="form.web_host" /><small>LlamaLens 管理页面的监听地址。</small></label>
         <label class="field"><span>Web Port</span><input v-model.number="form.web_port" type="number" /><small>LlamaLens 管理页面的端口；保存后需重启 LlamaLens。</small></label>
-        <label class="field"><span>llama-server Host</span><input v-model="form.llama_host" /><small>同时作为 Profile 的 <code>--host</code> 和健康检查、Benchmark 目标主机；同机部署建议使用 <code>127.0.0.1</code>。</small></label>
-        <label class="field"><span>llama-server Port</span><input v-model.number="form.llama_port" type="number" /><small>自动生成 Profile 的 <code>--port</code>，也是健康检查和 Benchmark 的目标端口。</small></label>
-        <label class="field"><span>Health Path</span><input v-model="form.health_path" /><small>切换 Profile 后检查服务是否启动成功，默认 <code>/health</code>。</small></label>
-        <label class="field"><span>Request Path</span><input v-model="form.request_path" /><small>Benchmark 发送推理请求的接口，默认 <code>/completion</code>。</small></label>
       </div>
     </PageSection>
 
     <div class="sticky-actions">
-      <button type="button" class="button secondary" @click="testConnection"><IconPlugConnected :size="17" />测试连接</button>
       <button class="button primary" :disabled="saving"><IconDeviceFloppy :size="17" />保存设置</button>
     </div>
-    <pre v-if="probe" class="code-block">{{ JSON.stringify(probe, null, 2) }}</pre>
   </form>
 </template>

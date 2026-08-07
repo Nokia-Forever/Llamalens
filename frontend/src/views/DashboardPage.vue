@@ -6,88 +6,76 @@ import MetricBlock from '../components/MetricBlock.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
-
-interface Summary {
-  service: { ok: boolean; stdout: string; stderr: string }
-  binary: { version: string | null; devices: string[]; errors: string[] }
-  active_profile: { id: string; name: string; model_path: string } | null
-  recent_benchmarks: Array<{ id: string; name: string; status: string; created_at: string }>
-  recent_switches: Array<{ id: string; profile_id: string; status: string; message: string }>
-}
+import type { BenchmarkJob, LlamaService } from '../types'
 
 const store = useAppStore()
-const data = ref<Summary | null>(null)
+const services = ref<LlamaService[]>([])
+const benchmarks = ref<BenchmarkJob[]>([])
 const loading = ref(true)
-const acting = ref(false)
-const serviceLabel = computed(() => (data.value?.service.ok ? '运行信息可读' : '未连接'))
+const actingId = ref<string | null>(null)
+const healthyCount = computed(() => services.value.filter((item) => item.status?.ok).length)
+const modelCount = computed(() => services.value.reduce((total, item) => total + item.models.filter((model) => model.enabled).length, 0))
 
 async function load() {
   loading.value = true
   try {
-    data.value = await api<Summary>('/system/summary')
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '加载概览失败')
-  } finally {
-    loading.value = false
-  }
+    ;[services.value, benchmarks.value] = await Promise.all([
+      api<LlamaService[]>('/services?with_status=true'), api<BenchmarkJob[]>('/benchmarks'),
+    ])
+  } catch (error) { store.notify('error', error instanceof Error ? error.message : '加载概览失败') }
+  finally { loading.value = false }
 }
 
-async function action(action: 'start' | 'restart') {
-  acting.value = true
+async function action(service: LlamaService, value: 'start' | 'restart') {
+  actingId.value = service.id
   try {
-    const result = await api<{ ok: boolean; stderr: string }>('/system/action', { method: 'POST', ...jsonBody({ action }) })
+    const result = await api<{ ok: boolean; stderr: string }>(`/services/${service.id}/action`, { method: 'POST', ...jsonBody({ action: value }) })
     store.notify(result.ok ? 'success' : 'error', result.ok ? '命令执行完成' : result.stderr || '命令执行失败')
     await load()
-  } finally {
-    acting.value = false
-  }
+  } finally { actingId.value = null }
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <div v-if="loading" class="skeleton-stack" aria-label="正在加载"><div /><div /><div /></div>
-  <div v-else-if="data" class="dashboard-layout">
-    <section class="service-hero">
-      <div>
-        <span class="service-kicker"><IconServer :size="17" /> llama.cpp service</span>
-        <h2>{{ data.active_profile?.name || '尚未激活 Profile' }}</h2>
-        <p>{{ data.active_profile?.model_path || '请先在设置中连接 service，并创建 Profile。' }}</p>
-      </div>
-      <div class="service-controls">
-        <StatusBadge :status="data.service.ok ? 'healthy' : 'inactive'" :label="serviceLabel" />
-        <button class="button secondary" :disabled="acting" @click="action('start')"><IconPlayerPlay :size="17" />启动</button>
-        <button class="button primary" :disabled="acting" @click="action('restart')"><IconRefresh :size="17" />重启</button>
-      </div>
-    </section>
-
+  <div v-if="loading" class="skeleton-stack"><div /><div /><div /></div>
+  <div v-else class="dashboard-layout">
     <div class="metrics-row">
-      <MetricBlock label="Binary" :value="data.binary.version?.split('\n')[0] || '未探测'" />
-      <MetricBlock label="Devices" :value="String(data.binary.devices.length)" :detail="data.binary.devices[0] || '暂无设备信息'" />
-      <MetricBlock label="Recent tests" :value="String(data.recent_benchmarks.length)" detail="最近 5 条" />
-      <MetricBlock label="Service" :value="data.service.ok ? 'Ready' : 'Check'" :accent="data.service.ok" />
+      <MetricBlock label="Services" :value="String(services.length)" />
+      <MetricBlock label="Healthy" :value="String(healthyCount)" accent />
+      <MetricBlock label="Models" :value="String(modelCount)" />
+      <MetricBlock label="Recent tests" :value="String(Math.min(benchmarks.length, 5))" />
     </div>
 
-    <div class="dashboard-columns">
-      <PageSection title="最近 Benchmark" description="测试请求和 Profile 分别保存快照。">
-        <div v-if="!data.recent_benchmarks.length" class="empty-state">还没有测试记录。</div>
-        <div v-else class="compact-list">
-          <RouterLink v-for="job in data.recent_benchmarks" :key="job.id" to="/results" class="compact-row">
-            <div><strong>{{ job.name }}</strong><span>{{ new Date(job.created_at).toLocaleString() }}</span></div>
-            <StatusBadge :status="job.status" />
-          </RouterLink>
-        </div>
-      </PageSection>
-      <PageSection title="切换记录" description="失败任务会保留诊断和回滚信息。">
-        <div v-if="!data.recent_switches.length" class="empty-state">还没有 Profile 切换记录。</div>
-        <div v-else class="compact-list">
-          <div v-for="job in data.recent_switches" :key="job.id" class="compact-row">
-            <div><strong>{{ job.message || 'Profile 切换' }}</strong><span>{{ job.profile_id }}</span></div>
-            <StatusBadge :status="job.status" />
+    <PageSection title="Llama Services" description="每个服务都使用独立的 unit、端口和模型配置。">
+      <div v-if="!services.length" class="empty-state">
+        还没有服务。<RouterLink to="/services">创建第一个 Llama Service</RouterLink>
+      </div>
+      <div v-else class="service-card-grid">
+        <article v-for="service in services" :key="service.id" class="service-hero service-card">
+          <div>
+            <span class="service-kicker"><IconServer :size="17" /> {{ service.unit_name }}</span>
+            <h2>{{ service.name }}</h2>
+            <p>{{ service.host }}:{{ service.port }} · {{ service.mode }} · {{ service.models.map((item) => item.alias).join(', ') }}</p>
           </div>
-        </div>
-      </PageSection>
-    </div>
+          <div class="service-controls">
+            <StatusBadge :status="service.status?.ok ? 'healthy' : 'inactive'" />
+            <button class="button secondary" :disabled="actingId === service.id" @click="action(service, 'start')"><IconPlayerPlay :size="17" />启动</button>
+            <button class="button primary" :disabled="actingId === service.id" @click="action(service, 'restart')"><IconRefresh :size="17" />重启</button>
+          </div>
+        </article>
+      </div>
+    </PageSection>
+
+    <PageSection title="最近 Benchmark">
+      <div v-if="!benchmarks.length" class="empty-state">还没有测试记录。</div>
+      <div v-else class="compact-list">
+        <RouterLink v-for="job in benchmarks.slice(0, 5)" :key="job.id" to="/results" class="compact-row">
+          <div><strong>{{ job.name }}</strong><span>{{ job.model_alias || '未指定模型' }} · {{ new Date(job.created_at).toLocaleString() }}</span></div>
+          <StatusBadge :status="job.status" />
+        </RouterLink>
+      </div>
+    </PageSection>
   </div>
 </template>

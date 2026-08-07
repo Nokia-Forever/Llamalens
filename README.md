@@ -1,17 +1,20 @@
 # LlamaLens
 
-LlamaLens 是一个部署在 llama.cpp 推理机本机的轻量 Web 控制台。它管理用户已经创建的 `llama-server` systemd service，把模型和启动参数保存为 Profile，并用独立 Benchmark 请求测量：
+LlamaLens 是一个部署在 llama.cpp 推理机本机的轻量 Web 控制台。它可以创建和管理多个 `llama-server` systemd service，把模型和启动参数保存为 Profile，并用独立 Benchmark 请求测量：
 
 - TTFT：请求开始到第一个实际内容 token 到达的时间。
 - Prefill tok/s：llama.cpp 返回的 `timings.prompt_per_second`。
 - Decode tok/s：llama.cpp 返回的 `timings.predicted_per_second`。
 - Client Decode tok/s：按首个和最后一个内容 token 的客户端时间戳计算，用于核对服务端指标。
 
-前端使用 Vue 3，后端使用 FastAPI、SQLAlchemy 和 SQLite。V1 不创建 service、不修改 sudoers、不保存 root 密码，也没有 Web 登录。
+前端使用 Vue 3，后端使用 FastAPI、SQLAlchemy 和 SQLite。当前 MVP 假设 LlamaLens 以 root 运行，能够写入 `/etc/systemd/system` 并直接调用 `systemctl`；默认仍只监听本机地址。
 
 ## 当前能力
 
-- 登记固定的 service 名称、unit 路径、system/user scope、控制命令和 llama-server 路径。
+- 创建多个独立的 Llama service，分别配置二进制、端口、运行用户和模型参数。
+- 支持单模型 `--model/--alias` 和 Router `--models-dir/--models-preset/--models-max/--models-autoload`。
+- 在 `[Unit]`、`[Service]`、`[Install]` 中追加自定义指令，并在部署前预览、复制或下载完整 unit。
+- 写入 unit 后执行 `daemon-reload`、`enable --now`，并支持启停、重启、日志、归档恢复和彻底删除。
 - 扫描多个模型目录，搜索 Hugging Face GGUF 文件并创建后台下载任务。
 - Profile 只要求名称和 GGUF 模型；其它参数从可搜索目录按需添加。
 - 从目标机 `llama-server --help` 刷新参数目录，并保留内置兼容目录。
@@ -55,32 +58,29 @@ Vite 会把 `/api` 代理到 `127.0.0.1:8000`。
 
 ## Linux 部署
 
-下面仅是参考流程。LlamaLens 不会替你执行这些命令。
+当前 MVP 会为 Services 页面创建的服务执行 systemd 命令。LlamaLens 自身仍需要先手工安装：
 
 1. 把项目放到 `/opt/llama-lens`，创建虚拟环境并构建前端。
-2. 创建非 root 用户 `llama-lens`，让它可以写 `/var/lib/llama-lens` 和需要下载模型的目录。
-3. 由用户创建 llama.cpp service。可参考 [llama-server.service.example](deploy/llama-server.service.example)。
-4. 由用户创建 LlamaLens service。可参考 [llama-lens.service.example](deploy/llama-lens.service.example)。
-5. 如果 llama.cpp 使用系统级 service，手动配置只允许固定 unit 的 sudoers。可参考 [sudoers.example](deploy/sudoers.example)。
-6. 在 Web 设置页填写实际路径和 llama-server 地址/端口，再从 Profiles 页面刷新本机参数目录。
+2. 创建 `/var/lib/llama-lens` 数据目录，并让 LlamaLens 可写。
+3. 创建 LlamaLens 自身的 service，并以 `User=root` 运行。
+4. 在 Services 页面填写 `llama-server` 路径、模型模式、端口和 systemd 自定义指令。
+5. 先生成预览，确认后保存并点击“部署 enable --now”。
 
-推荐的设置值：
+Services 页面生成的 unit 名强制使用 `llamalens-*.service`，例如：
 
 ```text
-Service 名称: llama-server.service
-Systemd 范围: system
-控制命令: /usr/bin/sudo -n /usr/bin/systemctl
-Active Profile: /var/lib/llama-lens/active-profile.json
-Web Host: 127.0.0.1
-Llama Host: 127.0.0.1
-Llama Port: 8080
+Unit 名称: llamalens-qwen.service
+llama-server: /opt/llama.cpp/build/bin/llama-server
+Host: 127.0.0.1
+Port: 8080
+Alias: qwen
 ```
 
-`Llama Host/Port` 有三项关联用途：自动加入每个 Profile 的最终启动命令（`--host`、`--port`）、切换 Profile 后执行健康检查、向同一地址发送 Benchmark 请求。因此一般不要再在 Profile 中重复添加 `--host` 或 `--port`，否则实际监听地址可能与健康检查、Benchmark 地址不一致。
+每个 service 的 Host/Port 同时用于启动参数、健康检查和 Benchmark。Benchmark 页面先选择 service，再选择该 service 内登记的模型 alias。
 
 ### systemctl 是否需要 root
 
-- 系统级 service 的 `start`、`stop`、`restart` 通常需要 root。LlamaLens 应以普通用户运行，并通过仅允许固定 unit 和固定动作的 sudoers 白名单获得权限。
+- 当前 MVP 直接以 root 运行 LlamaLens；不要把没有认证的管理端口暴露到公网。
 - `status` 有时普通用户可以执行，但不要依赖不同发行版的默认策略。
 - 用户级 service 使用 `systemctl --user`，不需要 root，但需要正确的用户会话或 linger 配置。
 - LlamaLens 使用 `sudo -n`，权限没配置好时会直接报错，不会弹出密码输入框。

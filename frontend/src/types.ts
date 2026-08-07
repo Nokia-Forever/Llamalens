@@ -43,6 +43,8 @@ export interface ModelFile {
 
 export interface Profile {
   id: string
+  service_id: string | null
+  model_alias: string
   name: string
   model_path: string
   catalog_args: SelectedArgument[]
@@ -82,6 +84,8 @@ export interface MetricSummary {
 export interface BenchmarkJob {
   id: string
   name: string
+  service_id: string | null
+  model_alias: string | null
   profile_id: string | null
   status: string
   config: Record<string, unknown>
@@ -95,4 +99,45 @@ export interface BenchmarkJob {
   started_at: string | null
   finished_at: string | null
   attempts?: BenchmarkAttempt[]
+}
+
+export interface ServiceModel {
+  id?: string
+  alias: string
+  model_path: string
+  display_name: string
+  enabled: boolean
+}
+
+export interface LlamaService {
+  id: string
+  name: string
+  description: string
+  unit_name: string
+  unit_path: string
+  server_bin: string
+  service_user: string
+  service_group: string
+  working_directory: string
+  host: string
+  port: number
+  health_path: string
+  request_path: string
+  mode: 'single' | 'router'
+  model_path: string
+  model_alias: string
+  models_dir: string
+  models_preset: string
+  models_max: number
+  models_autoload: boolean
+  models: ServiceModel[]
+  custom_args_text: string
+  unit_extra_text: string
+  service_extra_text: string
+  install_extra_text: string
+  rendered_unit: string
+  archived_at: string | null
+  created_at: string
+  updated_at: string
+  status?: { ok: boolean; stdout: string; stderr: string }
 }

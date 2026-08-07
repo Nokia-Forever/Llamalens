@@ -43,6 +43,39 @@ def run_service_action(settings: AppSettings, action: str, timeout: int = 30) ->
         return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
 
 
+def run_unit_action(unit_name: str, action: str, timeout: int = 30) -> CommandResult:
+    if action not in {"start", "stop", "restart", "status", "enable", "disable", "enable-now"}:
+        raise ValueError("不支持的 service 操作")
+    if action == "enable-now":
+        argv = ["systemctl", "enable", "--now", unit_name]
+    else:
+        argv = ["systemctl", action, unit_name]
+    try:
+        completed = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+        return CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+
+
+def daemon_reload(timeout: int = 30) -> CommandResult:
+    argv = ["systemctl", "daemon-reload"]
+    try:
+        completed = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+        return CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+
+
+def read_unit_journal(unit_name: str, lines: int = 200) -> CommandResult:
+    lines = max(1, min(lines, 500))
+    argv = ["journalctl", "-u", unit_name, "-n", str(lines), "--no-pager"]
+    try:
+        completed = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
+        return CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+
+
 def read_journal(settings: AppSettings, lines: int = 200) -> CommandResult:
     lines = max(1, min(lines, 500))
     argv = ["journalctl"]

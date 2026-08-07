@@ -63,10 +63,58 @@ class DownloadJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class LlamaService(Base):
+    __tablename__ = "llama_services"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    unit_name: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    unit_path: Mapped[str] = mapped_column(Text)
+    server_bin: Mapped[str] = mapped_column(Text)
+    service_user: Mapped[str] = mapped_column(String(120), default="root")
+    service_group: Mapped[str] = mapped_column(String(120), default="root")
+    working_directory: Mapped[str] = mapped_column(Text, default="/")
+    host: Mapped[str] = mapped_column(String(255), default="127.0.0.1")
+    port: Mapped[int] = mapped_column(Integer, default=8080, index=True)
+    health_path: Mapped[str] = mapped_column(String(255), default="/health")
+    request_path: Mapped[str] = mapped_column(String(255), default="/completion")
+    mode: Mapped[str] = mapped_column(String(32), default="single")
+    model_path: Mapped[str] = mapped_column(Text, default="")
+    model_alias: Mapped[str] = mapped_column(String(200), default="")
+    models_dir: Mapped[str] = mapped_column(Text, default="")
+    models_preset: Mapped[str] = mapped_column(Text, default="")
+    models_max: Mapped[int] = mapped_column(Integer, default=0)
+    models_autoload: Mapped[bool] = mapped_column(Boolean, default=False)
+    custom_args_text: Mapped[str] = mapped_column(Text, default="")
+    unit_extra_text: Mapped[str] = mapped_column(Text, default="")
+    service_extra_text: Mapped[str] = mapped_column(Text, default="")
+    install_extra_text: Mapped[str] = mapped_column(Text, default="")
+    rendered_unit: Mapped[str] = mapped_column(Text, default="")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    models: Mapped[list["ServiceModel"]] = relationship(back_populates="service", cascade="all, delete-orphan")
+
+
+class ServiceModel(Base):
+    __tablename__ = "service_models"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    service_id: Mapped[str] = mapped_column(ForeignKey("llama_services.id", ondelete="CASCADE"), index=True)
+    alias: Mapped[str] = mapped_column(String(200), index=True)
+    model_path: Mapped[str] = mapped_column(Text, default="")
+    display_name: Mapped[str] = mapped_column(String(300), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    service: Mapped[LlamaService] = relationship(back_populates="models")
+
+
 class Profile(Base):
     __tablename__ = "profiles"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    service_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    model_alias: Mapped[str] = mapped_column(String(200), default="")
     name: Mapped[str] = mapped_column(String(200), index=True)
     model_path: Mapped[str] = mapped_column(Text)
     catalog_args_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -107,6 +155,8 @@ class BenchmarkJob(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), default="Benchmark")
+    service_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    model_alias: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     profile_id: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     config_json: Mapped[str] = mapped_column(Text)

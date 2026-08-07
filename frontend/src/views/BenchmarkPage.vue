@@ -6,10 +6,13 @@ import MetricBlock from '../components/MetricBlock.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
-import type { BenchmarkJob, Profile } from '../types'
+import type { BenchmarkJob, LlamaService, Profile } from '../types'
 
 const store = useAppStore()
 const profiles = ref<Profile[]>([])
+const services = ref<LlamaService[]>([])
+const serviceId = ref('')
+const modelAlias = ref('')
 const current = ref<BenchmarkJob | null>(null)
 const running = ref(false)
 const extraText = ref('{}')
@@ -29,7 +32,9 @@ const form = reactive({
   concurrency: 1,
 })
 
-const activeProfile = computed(() => profiles.value.find((item) => item.is_active) || null)
+const selectedService = computed(() => services.value.find((item) => item.id === serviceId.value) || null)
+const serviceModels = computed(() => selectedService.value?.models.filter((item) => item.enabled) || [])
+const activeProfile = computed(() => profiles.value.find((item) => item.is_active && item.service_id === serviceId.value) || null)
 const metrics = computed(() => current.value?.summary.metrics || {})
 const requestPreview = computed(() => ({
   ...safeExtra(false),
@@ -39,6 +44,7 @@ const requestPreview = computed(() => ({
   ...(seedText.value.trim() === '' ? {} : { seed: Number(seedText.value) }),
   stop: stopText.value.split('\n').map((item) => item.trim()).filter(Boolean),
   cache_prompt: form.cache_prompt,
+  model: modelAlias.value || '<model-alias>',
   stream: true,
 }))
 
@@ -54,7 +60,11 @@ function safeExtra(throwOnError = true): Record<string, unknown> {
 }
 
 async function loadProfiles() {
-  profiles.value = await api<Profile[]>('/profiles')
+  ;[profiles.value, services.value] = await Promise.all([api<Profile[]>('/profiles'), api<LlamaService[]>('/services')])
+  if (!serviceId.value && services.value.length) {
+    serviceId.value = services.value[0].id
+    modelAlias.value = services.value[0].models.find((item) => item.enabled)?.alias || ''
+  }
 }
 
 async function poll() {
@@ -69,12 +79,15 @@ async function poll() {
 
 async function run() {
   if (!form.prompt.trim()) return store.notify('error', '请输入测试 Prompt')
+  if (!serviceId.value || !modelAlias.value) return store.notify('error', '请选择 Service 和模型 Alias')
   running.value = true
   try {
     current.value = await api<BenchmarkJob>('/benchmarks', {
       method: 'POST',
       ...jsonBody({
         ...form,
+        service_id: serviceId.value,
+        model_alias: modelAlias.value,
         seed: seedText.value.trim() === '' ? null : Number(seedText.value),
         profile_id: activeProfile.value?.id || null,
         stop: stopText.value.split('\n').map((item) => item.trim()).filter(Boolean),
@@ -113,6 +126,8 @@ onBeforeUnmount(() => timer && window.clearInterval(timer))
 
       <PageSection title="测试请求" description="Benchmark 参数不会写入 systemd service，也不会触发模型重启。">
         <div class="form-grid two-columns">
+          <label class="field"><span>目标 Service</span><select v-model="serviceId" required @change="modelAlias = serviceModels[0]?.alias || ''"><option value="" disabled>选择 Service</option><option v-for="service in services" :key="service.id" :value="service.id">{{ service.name }} · {{ service.host }}:{{ service.port }}</option></select></label>
+          <label class="field"><span>模型 Alias</span><select v-model="modelAlias" required><option value="" disabled>选择模型</option><option v-for="model in serviceModels" :key="model.alias" :value="model.alias">{{ model.display_name || model.alias }}</option></select></label>
           <label class="field"><span>测试名称</span><input v-model="form.name" required /></label>
           <label class="field"><span>当前 Profile</span><input :value="activeProfile?.name || '未关联'" disabled /></label>
         </div>

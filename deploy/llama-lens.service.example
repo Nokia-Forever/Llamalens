@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=llama-lens
-Group=llama-lens
+User=root
+Group=root
 WorkingDirectory=/opt/llama-lens/backend
 Environment=PYTHONPATH=/opt/llama-lens/backend
 Environment=LLAMALENS_DATA_DIR=/var/lib/llama-lens

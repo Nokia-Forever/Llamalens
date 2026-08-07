@@ -16,10 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import BenchmarkAttempt, BenchmarkJob, Profile, ProfileVersion, SwitchJob
+from app.models import BenchmarkAttempt, BenchmarkJob, LlamaService, Profile, ProfileVersion, SwitchJob
 from app.schemas import AppSettings, BenchmarkCreate
 from app.services.job_control import EXECUTION_LOCK
 from app.services.settings_service import get_settings
+from app.services.llama_services import app_settings_for_service
 
 
 BENCHMARK_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llamalens-benchmark")
@@ -31,7 +32,17 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
     switching = db.scalar(select(SwitchJob).where(SwitchJob.status.in_(["queued", "activating"])).limit(1))
     if switching is not None:
         raise ValueError("Profile 正在切换，完成后才能创建 Benchmark")
-    active = db.scalar(select(Profile).where(Profile.is_active.is_(True)))
+    service = db.get(LlamaService, payload.service_id) if payload.service_id else None
+    if payload.service_id and (service is None or service.archived_at is not None):
+        raise ValueError("Benchmark 目标服务不存在或已归档")
+    if service is not None:
+        aliases = {item.alias for item in service.models if item.enabled}
+        if not payload.model_alias or payload.model_alias not in aliases:
+            raise ValueError("请选择目标服务中有效的模型 alias")
+    active_query = select(Profile).where(Profile.is_active.is_(True))
+    if payload.service_id:
+        active_query = active_query.where(Profile.service_id == payload.service_id)
+    active = db.scalar(active_query)
     if payload.profile_id and (active is None or payload.profile_id != active.id):
         raise ValueError("Benchmark 只能关联当前激活的 Profile")
 
@@ -57,6 +68,8 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
     job = BenchmarkJob(
         id=str(uuid.uuid4()),
         name=payload.name,
+        service_id=payload.service_id,
+        model_alias=payload.model_alias,
         profile_id=profile_id,
         status="queued",
         config_json=json.dumps(config_payload, ensure_ascii=False),
@@ -91,6 +104,8 @@ def _base_payload(config: BenchmarkCreate, stream: bool) -> dict[str, Any]:
         payload["seed"] = config.seed
     if config.stop:
         payload["stop"] = config.stop
+    if config.model_alias:
+        payload["model"] = config.model_alias
     payload["stream"] = stream
     return payload
 
@@ -398,6 +413,11 @@ def _run_job_locked(job_id: str) -> None:
             return
         config = BenchmarkCreate.model_validate_json(job.config_json)
         settings = get_settings(db)
+        if config.service_id:
+            service = db.get(LlamaService, config.service_id)
+            if service is None or service.archived_at is not None:
+                raise ValueError("Benchmark 目标服务不存在或已归档")
+            settings = app_settings_for_service(service, settings)
         job.status = "running"
         job.started_at = datetime.now(timezone.utc)
         db.commit()

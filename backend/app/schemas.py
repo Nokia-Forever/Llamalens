@@ -61,6 +61,8 @@ class CatalogArgumentInput(BaseModel):
 
 
 class ProfileCreate(BaseModel):
+    service_id: str | None = None
+    model_alias: str = ""
     name: str = Field(min_length=1, max_length=200)
     model_path: str = Field(min_length=1)
     catalog_args: list[CatalogArgumentInput] = Field(default_factory=list)
@@ -84,6 +86,8 @@ class ProfileOut(ProfileCreate):
 
 class BenchmarkCreate(BaseModel):
     name: str = "Benchmark"
+    service_id: str | None = None
+    model_alias: str | None = None
     profile_id: str | None = None
     prompt: str = Field(min_length=1)
     max_tokens: int = Field(default=256, ge=1, le=131072)
@@ -106,3 +110,55 @@ class DownloadCreate(BaseModel):
 
 class ServiceAction(BaseModel):
     action: Literal["start", "stop", "restart", "status"]
+
+
+class ServiceModelInput(BaseModel):
+    alias: str = Field(min_length=1, max_length=200)
+    model_path: str = ""
+    display_name: str = ""
+    enabled: bool = True
+
+    @field_validator("alias")
+    @classmethod
+    def validate_alias(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(char.isspace() for char in value):
+            raise ValueError("模型 alias 不能为空或包含空白字符")
+        return value
+
+
+class LlamaServiceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    unit_name: str = ""
+    server_bin: str = Field(min_length=1)
+    service_user: str = "root"
+    service_group: str = "root"
+    working_directory: str = "/"
+    host: str = "127.0.0.1"
+    port: int = 8080
+    health_path: str = "/health"
+    request_path: str = "/completion"
+    mode: Literal["single", "router"] = "single"
+    model_path: str = ""
+    model_alias: str = ""
+    models_dir: str = ""
+    models_preset: str = ""
+    models_max: int = Field(default=0, ge=0)
+    models_autoload: bool = False
+    models: list[ServiceModelInput] = Field(default_factory=list)
+    custom_args_text: str = ""
+    unit_extra_text: str = ""
+    service_extra_text: str = ""
+    install_extra_text: str = ""
+
+    @field_validator("port")
+    @classmethod
+    def validate_service_port(cls, value: int) -> int:
+        if not 1 <= value <= 65535:
+            raise ValueError("端口必须在 1-65535 之间")
+        return value
+
+
+class LlamaServiceUpdate(LlamaServiceCreate):
+    pass

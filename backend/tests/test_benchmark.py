@@ -69,6 +69,11 @@ def test_extra_params_cannot_override_core_measurement_fields():
     assert payload["top_p"] == 0.9
 
 
+def test_model_alias_is_added_to_benchmark_request():
+    payload = benchmark._base_payload(BenchmarkCreate(prompt="hello", model_alias="qwen-router"), stream=True)
+    assert payload["model"] == "qwen-router"
+
+
 def test_benchmark_rejected_while_profile_switch_is_pending(monkeypatch):
     db = SessionLocal()
     try:

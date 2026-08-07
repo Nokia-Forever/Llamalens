@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
@@ -43,6 +43,35 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _migrate_legacy_columns()
+
+
+def _migrate_legacy_columns() -> None:
+    """Small SQLite-compatible migration for databases created by the V1 app."""
+    inspector = inspect(engine)
+    if "profiles" in inspector.get_table_names():
+        profile_columns = {column["name"] for column in inspector.get_columns("profiles")}
+        if "service_id" not in profile_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE profiles ADD COLUMN service_id VARCHAR(36)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_profiles_service_id ON profiles (service_id)"))
+        if "model_alias" not in profile_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE profiles ADD COLUMN model_alias VARCHAR(200) DEFAULT ''"))
+    inspector = inspect(engine)
+    if "benchmark_jobs" in inspector.get_table_names():
+        benchmark_columns = {column["name"] for column in inspector.get_columns("benchmark_jobs")}
+        additions = []
+        if "service_id" not in benchmark_columns:
+            additions.append("ALTER TABLE benchmark_jobs ADD COLUMN service_id VARCHAR(36)")
+        if "model_alias" not in benchmark_columns:
+            additions.append("ALTER TABLE benchmark_jobs ADD COLUMN model_alias VARCHAR(200)")
+        if additions:
+            with engine.begin() as connection:
+                for statement in additions:
+                    connection.execute(text(statement))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_service_id ON benchmark_jobs (service_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_model_alias ON benchmark_jobs (model_alias)"))
 
 
 def get_db():

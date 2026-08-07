@@ -267,3 +267,17 @@ code, pre, .metric-block strong, .data-table td:not(:first-child) { font-family:
   .detail-strip { grid-template-columns: 1fr 1fr; }
   .sticky-actions { bottom: 8px; }
 }
+
+.service-workspace .profile-editor { min-width: 0; }
+.unit-section-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.unit-preview { max-height: 520px; overflow: auto; white-space: pre-wrap; }
+.preview-actions { margin-bottom: 14px; }
+.router-model-row { grid-template-columns: 1fr 1fr 1.5fr auto; align-items: center; }
+.compact-stack { gap: 14px; }
+.service-actions { flex-wrap: wrap; }
+.service-card-grid { display: grid; gap: 14px; }
+.service-card { border: 1px solid var(--line); border-radius: var(--radius); }
+
+@media (max-width: 1100px) {
+  .unit-section-grid { grid-template-columns: 1fr; }
+}
