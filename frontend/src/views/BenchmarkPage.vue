@@ -181,11 +181,11 @@ onBeforeUnmount(() => timer && window.clearInterval(timer))
       </div>
       <StatusBadge :status="current?.status || 'idle'" />
       <div class="monitor-metrics">
-          <MetricBlock label="TTFT median" :value="`${format(metrics.ttft_ms?.median)} ms`" accent />
-          <MetricBlock label="Prefill median" :value="`${format(metrics.prefill_tps?.median)} tok/s`" />
-          <MetricBlock label="Decode median" :value="`${format(metrics.decode_tps?.median)} tok/s`" />
-          <MetricBlock label="Client decode" :value="`${format(metrics.client_decode_tps?.median)} tok/s`" />
-          <MetricBlock label="Total median" :value="`${format(metrics.total_ms?.median)} ms`" />
+          <MetricBlock label="TTFT 平均 / 中位数" :value="`${format(metrics.ttft_ms?.average)} / ${format(metrics.ttft_ms?.median)} ms`" accent />
+          <MetricBlock label="Prefill 平均 / 中位数" :value="`${format(metrics.prefill_tps?.average)} / ${format(metrics.prefill_tps?.median)} tok/s`" />
+          <MetricBlock label="Decode 平均 / 中位数" :value="`${format(metrics.decode_tps?.average)} / ${format(metrics.decode_tps?.median)} tok/s`" />
+          <MetricBlock label="Client decode 平均 / 中位数" :value="`${format(metrics.client_decode_tps?.average)} / ${format(metrics.client_decode_tps?.median)} tok/s`" />
+          <MetricBlock label="Total 平均 / 中位数" :value="`${format(metrics.total_ms?.average)} / ${format(metrics.total_ms?.median)} ms`" />
       </div>
       <div v-if="current" class="job-facts">
         <span>成功 <strong>{{ current.summary.successes || 0 }}</strong></span>

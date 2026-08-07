@@ -34,9 +34,9 @@ function draw() {
       { type: 'value', name: 'ms', axisLabel: { color: '#7c858f' }, splitLine: { show: false } },
     ],
     series: [
-      { name: 'TTFT ms', type: 'line', yAxisIndex: 1, smooth: true, data: jobs.map((job) => job.summary.metrics?.ttft_ms?.median ?? null) },
-      { name: 'Prefill tok/s', type: 'line', yAxisIndex: 0, smooth: true, data: jobs.map((job) => job.summary.metrics?.prefill_tps?.median ?? null) },
-      { name: 'Decode tok/s', type: 'line', yAxisIndex: 0, smooth: true, data: jobs.map((job) => job.summary.metrics?.decode_tps?.median ?? null) },
+      { name: 'TTFT ms', type: 'line', yAxisIndex: 1, smooth: true, data: jobs.map((job) => job.summary.metrics?.ttft_ms?.average ?? null) },
+      { name: 'Prefill tok/s', type: 'line', yAxisIndex: 0, smooth: true, data: jobs.map((job) => job.summary.metrics?.prefill_tps?.average ?? null) },
+      { name: 'Decode tok/s', type: 'line', yAxisIndex: 0, smooth: true, data: jobs.map((job) => job.summary.metrics?.decode_tps?.average ?? null) },
     ],
   })
 }

@@ -20,7 +20,8 @@ from app.models import BenchmarkAttempt, BenchmarkJob, LlamaService, Profile, Pr
 from app.schemas import AppSettings, BenchmarkCreate, LaunchConfig, LlamaServiceCreate
 from app.services.job_control import EXECUTION_LOCK
 from app.services.settings_service import get_settings
-from app.services.llama_services import launch_aliases
+from app.services.llama_services import launch_aliases, render_unit
+from app.services.profiles_service import build_launch_argv
 
 
 BENCHMARK_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llamalens-benchmark")
@@ -74,6 +75,9 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
     config_payload["service_snapshot"] = {
         "id": service.id,
         "name": applied_service.name,
+        "unit_name": service.unit_name,
+        "unit_path": service.unit_path,
+        "unit_content": service.rendered_unit,
         "host": applied_service.host,
         "port": applied_service.port,
         "health_path": applied_service.health_path,
@@ -96,6 +100,50 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
     db.refresh(job)
     BENCHMARK_EXECUTOR.submit(_run_job, job.id)
     return job
+
+
+def benchmark_service_unit(db: Session, job: BenchmarkJob) -> dict[str, str]:
+    config = json.loads(job.config_json)
+    snapshot = config.get("service_snapshot")
+    if not isinstance(snapshot, dict):
+        raise ValueError("该 Benchmark 没有保存 Service 快照")
+
+    unit_name = str(snapshot.get("unit_name") or "")
+    unit_path = str(snapshot.get("unit_path") or "")
+    content = snapshot.get("unit_content")
+    if isinstance(content, str) and content:
+        return {"unit_name": unit_name, "unit_path": unit_path, "content": content, "source": "snapshot"}
+
+    runtime_config = snapshot.get("runtime_config")
+    launch_config = snapshot.get("applied_launch_config")
+    if isinstance(runtime_config, dict) and isinstance(launch_config, dict):
+        runtime = LlamaServiceCreate.model_validate(runtime_config)
+        launch = LaunchConfig.model_validate(launch_config)
+        settings = AppSettings(
+            llama_server_bin=runtime.server_bin,
+            llama_host=runtime.host,
+            llama_port=runtime.port,
+            health_path=runtime.health_path,
+            request_path=runtime.request_path,
+        )
+        built = build_launch_argv(db, settings, launch)
+        rendered = render_unit(runtime, built.argv, unit_name or runtime.unit_name)
+        return {
+            "unit_name": str(rendered["unit_name"]),
+            "unit_path": unit_path or str(rendered["unit_path"]),
+            "content": str(rendered["content"]),
+            "source": "reconstructed",
+        }
+
+    service = db.get(LlamaService, job.service_id) if job.service_id else None
+    if service is not None and service.rendered_unit:
+        return {
+            "unit_name": service.unit_name,
+            "unit_path": service.unit_path,
+            "content": service.rendered_unit,
+            "source": "current-service-fallback",
+        }
+    raise ValueError("该历史 Benchmark 无法还原 Service 文件")
 
 
 def cancel_benchmark(job_id: str) -> None:
@@ -441,6 +489,7 @@ def _summarize(job_id: str) -> dict[str, Any]:
         }
         for key, values in metrics.items():
             summary["metrics"][key] = {
+                "average": statistics.fmean(values) if values else None,
                 "median": statistics.median(values) if values else None,
                 "p10": _percentile(values, 0.10),
                 "p90": _percentile(values, 0.90),

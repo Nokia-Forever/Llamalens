@@ -165,11 +165,14 @@ def test_benchmark_requires_applied_service(monkeypatch):
             name="one", unit_name="llamalens-one.service", server_bin="/opt/llama-server",
             host="127.0.0.1", port=9000,
         ).model_dump_json()
+        service.rendered_unit = "[Unit]\nDescription=one\n"
         db.commit()
         job = benchmark.create_benchmark_job(db, BenchmarkCreate(prompt="hello", service_id=service.id, model_alias="one", repeat_delay_ms=125))
         assert job.service_id == service.id
         snapshot = json.loads(job.config_json)
         assert snapshot["service_snapshot"]["port"] == 9000
+        assert snapshot["service_snapshot"]["unit_name"] == "llamalens-one.service"
+        assert snapshot["service_snapshot"]["unit_content"] == service.rendered_unit
         assert snapshot["repeat_delay_ms"] == 125
     finally:
         db.close()
@@ -204,6 +207,32 @@ def test_attempt_detail_returns_generated_text(client):
     assert response.status_code == 200
     assert response.json()["output_text"] == "model answer"
     assert response.json()["request"] == {"prompt": "hello"}
+
+
+def test_benchmark_service_unit_returns_saved_snapshot(client):
+    db = SessionLocal()
+    try:
+        job = _stored_job("unit-snapshot")
+        job.config_json = json.dumps({
+            "prompt": "hello",
+            "service_snapshot": {
+                "unit_name": "llamalens-one.service",
+                "unit_path": "/etc/systemd/system/llamalens-one.service",
+                "unit_content": "[Unit]\nDescription=one\n",
+            },
+        })
+        db.add(job)
+        db.commit()
+    finally:
+        db.close()
+    response = client.get("/api/v1/benchmarks/unit-snapshot/service-unit")
+    assert response.status_code == 200
+    assert response.json() == {
+        "unit_name": "llamalens-one.service",
+        "unit_path": "/etc/systemd/system/llamalens-one.service",
+        "content": "[Unit]\nDescription=one\n",
+        "source": "snapshot",
+    }
 
 
 def test_delete_single_cascades_attempts(client):

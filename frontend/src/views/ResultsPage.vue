@@ -6,7 +6,7 @@ import MetricsChart from '../components/MetricsChart.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
-import type { BenchmarkAttemptDetail, BenchmarkJob } from '../types'
+import type { BenchmarkAttempt, BenchmarkAttemptDetail, BenchmarkJob, BenchmarkServiceUnit } from '../types'
 
 const store = useAppStore()
 const jobs = ref<BenchmarkJob[]>([])
@@ -17,6 +17,13 @@ const status = ref('all')
 const loading = ref(true)
 const attemptDetails = ref<Record<number, BenchmarkAttemptDetail>>({})
 const attemptLoading = ref<number[]>([])
+const serviceUnit = ref<BenchmarkServiceUnit | null>(null)
+const serviceUnitLoading = ref(false)
+const serviceUnitError = ref('')
+const selectedAttemptIds = ref<number[]>([])
+const selectedAttemptIdsByJob = ref<Record<string, number[]>>({})
+
+type AttemptMetricKey = 'ttft_ms' | 'prefill_tps' | 'decode_tps' | 'client_decode_tps' | 'total_ms' | 'prompt_tokens' | 'predicted_tokens'
 
 const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled'])
 const filtered = computed(() => jobs.value.filter((job) => {
@@ -29,6 +36,9 @@ const selectedJobs = computed(() => jobs.value.filter((job) => selectedIds.value
 const trendJobs = computed(() => selectedJobs.value.filter((job) => job.status === 'succeeded'))
 const allFilteredSelected = computed(() => filtered.value.length > 0 && filtered.value.every((job) => selectedIds.value.includes(job.id)))
 const selectedCanDelete = computed(() => selectedJobs.value.length > 0 && selectedJobs.value.every((job) => terminalStatuses.has(job.status)))
+const selectableAttempts = computed(() => selected.value?.attempts?.filter((attempt) => !attempt.warmup && attempt.status === 'succeeded') || [])
+const selectedAttempts = computed(() => selectableAttempts.value.filter((attempt) => selectedAttemptIds.value.includes(attempt.id)))
+const allAttemptsSelected = computed(() => selectableAttempts.value.length > 0 && selectableAttempts.value.every((attempt) => selectedAttemptIds.value.includes(attempt.id)))
 
 async function load() {
   loading.value = true
@@ -46,9 +56,17 @@ async function load() {
 }
 
 async function selectJob(id: string) {
+  if (selected.value) selectedAttemptIdsByJob.value[selected.value.id] = [...selectedAttemptIds.value]
   selected.value = await api<BenchmarkJob>(`/benchmarks/${id}`)
   attemptDetails.value = {}
   attemptLoading.value = []
+  serviceUnit.value = null
+  serviceUnitLoading.value = false
+  serviceUnitError.value = ''
+  const saved = selectedAttemptIdsByJob.value[id]
+  selectedAttemptIds.value = saved
+    ? saved.filter((attemptId) => selectableAttempts.value.some((attempt) => attempt.id === attemptId))
+    : selectableAttempts.value.map((attempt) => attempt.id)
 }
 
 function toggleFiltered(event: Event) {
@@ -62,6 +80,10 @@ function toggleFiltered(event: Event) {
 }
 
 function metric(job: BenchmarkJob, key: string) {
+  return job.summary.metrics?.[key]?.average ?? null
+}
+
+function medianMetric(job: BenchmarkJob, key: string) {
   return job.summary.metrics?.[key]?.median ?? null
 }
 
@@ -69,19 +91,100 @@ function format(value: number | null | undefined, digits = 2) {
   return value == null ? 'N/A' : value.toFixed(digits)
 }
 
+function attemptAverage(key: AttemptMetricKey) {
+  const values = selectedAttempts.value
+    .map((attempt) => attempt[key])
+    .filter((value): value is number => typeof value === 'number')
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
+}
+
+function selectAllAttempts() {
+  selectedAttemptIds.value = selectableAttempts.value.map((attempt) => attempt.id)
+  if (selected.value) selectedAttemptIdsByJob.value[selected.value.id] = [...selectedAttemptIds.value]
+}
+
+function clearAttemptSelection() {
+  selectedAttemptIds.value = []
+  if (selected.value) selectedAttemptIdsByJob.value[selected.value.id] = []
+}
+
+function attemptSelectable(attempt: BenchmarkAttempt) {
+  return !attempt.warmup && attempt.status === 'succeeded'
+}
+
 function targetName(job: BenchmarkJob) {
   const service = job.config.service_snapshot as Record<string, unknown> | null
   return `${String(service?.name || '未知 Service')} · ${job.model_alias || '未指定 alias'}`
 }
 
-function exportCsv() {
+function serviceUnitName(job: BenchmarkJob) {
+  const snapshot = job.config.service_snapshot as Record<string, unknown> | null
+  return String(snapshot?.unit_name || 'systemd service')
+}
+
+function serviceUnitSource(source: BenchmarkServiceUnit['source']) {
+  if (source === 'snapshot') return '测试时保存的部署快照'
+  if (source === 'reconstructed') return '根据该测试的历史配置还原'
+  return '历史快照缺失，使用当前 Service 文件'
+}
+
+async function onServiceUnitToggle(event: Event) {
+  if (!(event.currentTarget as HTMLDetailsElement).open || !selected.value || serviceUnit.value || serviceUnitLoading.value) return
+  const jobId = selected.value.id
+  serviceUnitLoading.value = true
+  serviceUnitError.value = ''
+  try {
+    const unit = await api<BenchmarkServiceUnit>(`/benchmarks/${jobId}/service-unit`)
+    if (selected.value?.id === jobId) serviceUnit.value = unit
+  } catch (error) {
+    if (selected.value?.id === jobId) serviceUnitError.value = error instanceof Error ? error.message : '加载 Service 文件失败'
+  } finally {
+    if (selected.value?.id === jobId) serviceUnitLoading.value = false
+  }
+}
+
+function averageFromAttempts(attempts: BenchmarkAttempt[], key: AttemptMetricKey) {
+  const values = attempts.map((attempt) => attempt[key]).filter((value): value is number => typeof value === 'number')
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
+}
+
+function formalSuccessfulAttempts(job: BenchmarkJob) {
+  return (job.attempts || []).filter((attempt) => !attempt.warmup && attempt.status === 'succeeded')
+}
+
+async function exportCsv() {
   if (!selectedJobs.value.length) return
-  const header = ['name', 'target', 'status', 'ttft_ms', 'prefill_tps', 'decode_tps', 'client_decode_tps', 'total_ms', 'successes', 'failures', 'created_at']
+  if (selected.value) selectedAttemptIdsByJob.value[selected.value.id] = [...selectedAttemptIds.value]
+  const detailedJobs = await Promise.all(selectedJobs.value.map(async (job) => {
+    if (selected.value?.id === job.id) return selected.value
+    return api<BenchmarkJob>(`/benchmarks/${job.id}`)
+  }))
+  const header = [
+    'name', 'target', 'status', 'selected_count',
+    'ttft_avg', 'ttft_median', 'prefill_avg', 'prefill_median', 'decode_avg', 'decode_median',
+    'client_decode_avg', 'client_decode_median', 'total_avg', 'total_median',
+    'prompt_tokens_avg', 'predicted_tokens_avg', 'successes', 'failures', 'created_at',
+  ]
   const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`
-  const rows = selectedJobs.value.map((job) => [
-    job.name, targetName(job), job.status, metric(job, 'ttft_ms'), metric(job, 'prefill_tps'), metric(job, 'decode_tps'),
-    metric(job, 'client_decode_tps'), metric(job, 'total_ms'), job.summary.successes, job.summary.failures, job.created_at,
-  ])
+  const rows = detailedJobs.map((job) => {
+    const allAttempts = formalSuccessfulAttempts(job)
+    const selectedIdsForJob = selected.value?.id === job.id
+      ? selectedAttemptIds.value
+      : selectedAttemptIdsByJob.value[job.id]
+    const attempts = selectedIdsForJob
+      ? allAttempts.filter((attempt) => selectedIdsForJob.includes(attempt.id))
+      : allAttempts
+    return [
+      job.name, targetName(job), job.status, attempts.length,
+      averageFromAttempts(attempts, 'ttft_ms'), medianMetric(job, 'ttft_ms'),
+      averageFromAttempts(attempts, 'prefill_tps'), medianMetric(job, 'prefill_tps'),
+      averageFromAttempts(attempts, 'decode_tps'), medianMetric(job, 'decode_tps'),
+      averageFromAttempts(attempts, 'client_decode_tps'), medianMetric(job, 'client_decode_tps'),
+      averageFromAttempts(attempts, 'total_ms'), medianMetric(job, 'total_ms'),
+      averageFromAttempts(attempts, 'prompt_tokens'), averageFromAttempts(attempts, 'predicted_tokens'),
+      job.summary.successes, job.summary.failures, job.created_at,
+    ]
+  })
   const csv = `\ufeff${[header, ...rows].map((row) => row.map(quote).join(',')).join('\n')}`
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -133,7 +236,7 @@ onMounted(load)
 
 <template>
   <div class="page-stack">
-    <PageSection title="结果对比" description="默认展示关键指标；勾选后可批量删除或只导出选中的测试。">
+    <PageSection title="结果对比" description="列表指标使用算术平均值；进入详情后可取消异常请求，重新计算选中请求平均值。">
       <template #actions>
         <div class="inline-actions results-toolbar">
           <label class="search-box"><IconSearch :size="17" /><input v-model="query" placeholder="搜索测试、Service 或模型" /></label>
@@ -141,7 +244,7 @@ onMounted(load)
           <span class="selection-count">已选 {{ selectedJobs.length }} 项</span>
           <button class="button secondary" @click="load"><IconRefresh :size="17" />刷新</button>
           <button class="button danger" :disabled="!selectedCanDelete" @click="deleteJobs(selectedIds)"><IconTrash :size="17" />删除选中</button>
-          <button class="button primary" :disabled="!selectedJobs.length" @click="exportCsv"><IconDownload :size="17" />导出选中 CSV</button>
+          <button class="button primary" :disabled="!selectedJobs.length" @click="exportCsv"><IconDownload :size="17" />导出选中测试 CSV</button>
         </div>
       </template>
       <div v-if="loading" class="skeleton-stack"><div /><div /></div>
@@ -171,7 +274,7 @@ onMounted(load)
       <div v-else class="empty-state compact">请在上方勾选至少一个成功的测试结果，趋势图会按勾选项生成。</div>
     </PageSection>
 
-    <PageSection v-if="selected" title="测试详情" description="关键指标直接展示；点击某一轮后才加载模型回答、请求和原始响应。">
+    <PageSection v-if="selected" title="测试详情" description="指标使用已选正式成功请求的算术平均值；中位数会保留并随 CSV 一起导出。">
       <template #actions>
         <button v-if="terminalStatuses.has(selected.status)" class="button danger" @click="deleteJobs([selected.id])"><IconTrash :size="17" />删除此测试</button>
       </template>
@@ -182,15 +285,38 @@ onMounted(load)
         <span><small>并发 / 间隔</small><strong>{{ selected.config.concurrency }} / {{ selected.config.repeat_delay_ms || 0 }} ms</strong></span>
       </div>
       <div class="monitor-metrics result-summary-metrics">
-        <div class="metric-block metric-accent"><span>TTFT median</span><strong>{{ format(metric(selected, 'ttft_ms')) }} ms</strong></div>
-        <div class="metric-block"><span>Prefill median</span><strong>{{ format(metric(selected, 'prefill_tps')) }} tok/s</strong></div>
-        <div class="metric-block"><span>Decode median</span><strong>{{ format(metric(selected, 'decode_tps')) }} tok/s</strong></div>
-        <div class="metric-block"><span>Total median</span><strong>{{ format(metric(selected, 'total_ms')) }} ms</strong></div>
+        <div class="metric-block metric-accent"><span>TTFT 平均</span><strong>{{ format(attemptAverage('ttft_ms')) }} ms</strong></div>
+        <div class="metric-block"><span>Prefill 平均</span><strong>{{ format(attemptAverage('prefill_tps')) }} tok/s</strong></div>
+        <div class="metric-block"><span>Decode 平均</span><strong>{{ format(attemptAverage('decode_tps')) }} tok/s</strong></div>
+        <div class="metric-block"><span>Client Decode 平均</span><strong>{{ format(attemptAverage('client_decode_tps')) }} tok/s</strong></div>
+        <div class="metric-block"><span>Total 平均</span><strong>{{ format(attemptAverage('total_ms')) }} ms</strong></div>
       </div>
+      <div class="attempt-selection-toolbar">
+        <span>已选 {{ selectedAttempts.length }} / {{ selectableAttempts.length }} 个正式成功请求</span>
+        <div class="inline-actions">
+          <button class="button secondary" :disabled="!selectableAttempts.length || allAttemptsSelected" @click="selectAllAttempts">全选</button>
+          <button class="button secondary" :disabled="!selectedAttempts.length" @click="clearAttemptSelection">取消全选</button>
+        </div>
+      </div>
+
+      <details class="raw-detail service-unit-detail" @toggle="onServiceUnitToggle">
+        <summary>Service 文件 · {{ serviceUnitName(selected) }}</summary>
+        <div v-if="serviceUnitLoading" class="empty-state compact">正在加载 Service 文件…</div>
+        <div v-else-if="serviceUnitError" class="risk-banner">{{ serviceUnitError }}</div>
+        <template v-else-if="serviceUnit">
+          <div class="detail-strip">
+            <span><small>Unit</small><strong>{{ serviceUnit.unit_name }}</strong></span>
+            <span><small>路径</small><strong>{{ serviceUnit.unit_path }}</strong></span>
+            <span><small>来源</small><strong>{{ serviceUnitSource(serviceUnit.source) }}</strong></span>
+          </div>
+          <pre class="code-block compact-code">{{ serviceUnit.content }}</pre>
+        </template>
+      </details>
 
       <div v-if="selected.attempts?.length" class="attempt-detail-list">
         <details v-for="attempt in selected.attempts" :key="attempt.id" class="attempt-detail" @toggle="onAttemptToggle($event, attempt.id)">
           <summary class="attempt-detail-summary">
+            <label class="attempt-checkbox" @click.stop><input v-model="selectedAttemptIds" type="checkbox" :value="attempt.id" :disabled="!attemptSelectable(attempt)" :aria-label="`选择第 ${attempt.ordinal} 次请求`" /></label>
             <span><strong>#{{ attempt.ordinal }}</strong><small>{{ attempt.warmup ? 'warm-up · 不计入汇总' : attempt.measurement_mode }}</small></span>
             <span><small>TTFT</small><strong>{{ format(attempt.ttft_ms) }} ms</strong></span>
             <span><small>Prefill</small><strong>{{ format(attempt.prefill_tps) }}</strong></span>

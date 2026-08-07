@@ -86,7 +86,15 @@ export interface BenchmarkAttemptDetail extends BenchmarkAttempt {
   created_at: string
 }
 
+export interface BenchmarkServiceUnit {
+  unit_name: string
+  unit_path: string
+  content: string
+  source: 'snapshot' | 'reconstructed' | 'current-service-fallback'
+}
+
 export interface MetricSummary {
+  average: number | null
   median: number | null
   p10: number | null
   p90: number | null
