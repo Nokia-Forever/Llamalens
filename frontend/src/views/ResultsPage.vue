@@ -25,8 +25,8 @@ const filtered = computed(() => jobs.value.filter((job) => {
   const haystack = `${job.name} ${profile?.name || ''} ${service?.name || ''} ${job.model_alias || ''}`.toLowerCase()
   return haystack.includes(query.value.toLowerCase()) && (status.value === 'all' || job.status === status.value)
 }))
-const completed = computed(() => filtered.value.filter((job) => job.status === 'succeeded'))
 const selectedJobs = computed(() => jobs.value.filter((job) => selectedIds.value.includes(job.id)))
+const trendJobs = computed(() => selectedJobs.value.filter((job) => job.status === 'succeeded'))
 const allFilteredSelected = computed(() => filtered.value.length > 0 && filtered.value.every((job) => selectedIds.value.includes(job.id)))
 const selectedCanDelete = computed(() => selectedJobs.value.length > 0 && selectedJobs.value.every((job) => terminalStatuses.has(job.status)))
 
@@ -166,8 +166,9 @@ onMounted(load)
       </div>
     </PageSection>
 
-    <PageSection v-if="completed.length" title="趋势图" description="TTFT 使用右轴，Prefill 与 Decode 使用左轴。">
-      <MetricsChart :jobs="completed" />
+    <PageSection v-if="jobs.length" title="趋势图" description="趋势图只使用已勾选的成功测试；TTFT 使用右轴，Prefill 与 Decode 使用左轴。">
+      <MetricsChart v-if="trendJobs.length" :jobs="trendJobs" />
+      <div v-else class="empty-state compact">请在上方勾选至少一个成功的测试结果，趋势图会按勾选项生成。</div>
     </PageSection>
 
     <PageSection v-if="selected" title="测试详情" description="关键指标直接展示；点击某一轮后才加载模型回答、请求和原始响应。">

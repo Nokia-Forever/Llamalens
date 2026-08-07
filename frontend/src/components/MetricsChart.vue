@@ -15,7 +15,9 @@ let chart: EChartsType | null = null
 function draw() {
   if (!element.value) return
   chart ||= init(element.value)
-  const jobs = props.jobs.slice(0, 12).reverse()
+  const jobs = props.jobs.slice().sort((left, right) => (
+    new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+  ))
   chart.setOption({
     animationDuration: 250,
     tooltip: { trigger: 'axis' },

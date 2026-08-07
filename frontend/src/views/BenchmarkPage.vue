@@ -42,12 +42,13 @@ const serviceModels = computed<LaunchModel[]>(() => {
   return config.models.filter((item) => item.enabled)
 })
 const metrics = computed(() => current.value?.summary.metrics || {})
+const normalizedSeed = computed(() => String(seedText.value ?? '').trim())
 const requestPreview = computed(() => ({
   ...safeExtra(false),
   prompt: form.prompt || '<请输入 Prompt>',
   n_predict: form.max_tokens,
   temperature: form.temperature,
-  ...(seedText.value.trim() === '' ? {} : { seed: Number(seedText.value) }),
+  ...(normalizedSeed.value === '' ? {} : { seed: Number(normalizedSeed.value) }),
   stop: stopText.value.split('\n').map((item) => item.trim()).filter(Boolean),
   cache_prompt: form.cache_prompt,
   model: modelAlias.value || '<model-alias>',
@@ -97,7 +98,7 @@ async function run() {
         ...form,
         service_id: serviceId.value,
         model_alias: modelAlias.value,
-        seed: seedText.value.trim() === '' ? null : Number(seedText.value),
+        seed: normalizedSeed.value === '' ? null : Number(normalizedSeed.value),
         stop: stopText.value.split('\n').map((item) => item.trim()).filter(Boolean),
         extra_params: safeExtra(),
       }),
