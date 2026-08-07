@@ -189,6 +189,27 @@ def extract_output_text(payload: Any) -> str:
     return "".join(extract_output_text(item) for item in payload)
 
 
+def _join_stream_content(events: list[dict[str, Any]]) -> str:
+    """Join llama.cpp SSE content whether chunks are deltas or cumulative text."""
+    output = ""
+    cumulative = False
+    for event in events:
+        content = _content_from_event(event)
+        if not content:
+            continue
+        if not output:
+            output = content
+            continue
+        if content.startswith(output):
+            output = content
+            cumulative = True
+            continue
+        if cumulative and output.startswith(content):
+            continue
+        output += content
+    return output
+
+
 def _parse_number(mapping: dict[str, Any] | None, *keys: str) -> float | None:
     if not mapping:
         return None
@@ -279,7 +300,7 @@ def _stream_measurement(settings: AppSettings, config: BenchmarkCreate) -> dict[
     first_content: float | None = None
     last_content: float | None = None
     chunks: list[dict[str, Any]] = []
-    output_text: list[str] = []
+    content_events: list[dict[str, Any]] = []
     timings: dict[str, Any] | None = None
     with _ResourceSampler() as sampler:
         with httpx.Client(timeout=config.timeout_seconds) as client:
@@ -298,11 +319,11 @@ def _stream_measurement(settings: AppSettings, config: BenchmarkCreate) -> dict[
                     chunks.append(event)
                     content = _content_from_event(event)
                     if content:
+                        content_events.append(event)
                         now = time.perf_counter()
                         if first_content is None:
                             first_content = now
                         last_content = now
-                        output_text.append(content)
                     event_timings = _find_timings(event)
                     if event_timings:
                         timings = event_timings
@@ -313,7 +334,7 @@ def _stream_measurement(settings: AppSettings, config: BenchmarkCreate) -> dict[
         client_decode = (predicted_n - 1) / (last_content - first_content)
     return {
         "request": request_payload,
-        "raw": {"events": chunks, "content": "".join(output_text)},
+        "raw": {"events": chunks, "content": _join_stream_content(content_events)},
         "timings": timings,
         "ttft_ms": (first_content - started) * 1000 if first_content is not None else None,
         "total_ms": (finished - started) * 1000,

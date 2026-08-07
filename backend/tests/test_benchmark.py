@@ -67,6 +67,18 @@ def test_extract_output_text_supports_paired_response():
     assert benchmark.extract_output_text(payload) == "paired output"
 
 
+def test_stream_content_joiner_handles_incremental_and_cumulative_chunks():
+    assert benchmark._join_stream_content([
+        {"content": "你"}, {"content": "好"}, {"content": "，世界"},
+    ]) == "你好，世界"
+    assert benchmark._join_stream_content([
+        {"content": "你"}, {"content": "你好"}, {"content": "你好，世界"},
+    ]) == "你好，世界"
+    assert benchmark._join_stream_content([
+        {"content": "你好"}, {"content": "，世界"}, {"content": "你好，世界"},
+    ]) == "你好，世界"
+
+
 def test_extra_params_cannot_override_core_measurement_fields():
     config = BenchmarkCreate(
         prompt="real prompt",
