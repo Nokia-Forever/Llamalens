@@ -13,6 +13,14 @@ from app.database import SessionLocal
 from app.models import BenchmarkJob, BenchmarkTask, TaskQueue, TaskQueueItem, TaskQueueHistory
 from app.services.benchmark import cancel_benchmark, create_run_for_task, is_benchmark_active, run_benchmark_job
 
+
+def _aware_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 _scheduler: QueueScheduler | None = None
 
 
@@ -269,7 +277,8 @@ def recover_on_startup() -> None:
             q.current_item_id = None
         q.status = "idle"
         now = datetime.now(timezone.utc)
-        if q.next_dispatch_at is not None and q.next_dispatch_at <= now:
+        next_at = _aware_utc(q.next_dispatch_at)
+        if next_at is not None and next_at <= now:
             q.next_dispatch_at = None
         db.commit()
     finally:
@@ -335,7 +344,8 @@ class QueueScheduler:
     def _try_dispatch(self, db: Session, q: TaskQueue) -> None:
         now = datetime.now(timezone.utc)
 
-        if q.next_dispatch_at is not None and now < q.next_dispatch_at:
+        next_at = _aware_utc(q.next_dispatch_at)
+        if next_at is not None and now < next_at:
             return
 
         waiting = db.scalars(
@@ -422,7 +432,7 @@ class QueueScheduler:
             q.next_dispatch_at = None if waiting_count == 0 else q.next_dispatch_at
         else:
             if waiting_count > 0:
-                q.next_dispatch_at = now + timedelta(milliseconds=q.interval_ms)
+                q.next_dispatch_at = now + timedelta(milliseconds=q.interval_ms) if q.interval_ms > 0 else None
             else:
                 q.status = "idle"
                 q.next_dispatch_at = None

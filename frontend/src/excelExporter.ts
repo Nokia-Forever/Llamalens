@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs'
 import type { BenchmarkJob } from './types'
+import { formatDate } from './utils'
 import { aggregateStat, getMetricStat, STAT_LABELS, targetName, type MetricConfig, type StatKey } from './metricsStats'
 
 export interface ExportImageSource {
@@ -74,7 +75,7 @@ export async function exportObservationExcel(params: ExportParams): Promise<void
       targetName(job),
       job.model_alias || '',
       job.status,
-      new Date(job.created_at).toLocaleString(),
+      formatDate(job.created_at),
       job.summary.successes || 0,
       job.summary.failures || 0,
       ...metrics.flatMap((metric) => STAT_KEYS.map((stat) => getMetricStat(job, metric.key, stat) ?? '')),

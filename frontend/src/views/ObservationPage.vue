@@ -26,6 +26,7 @@ import {
   type StatKey,
 } from '../metricsStats'
 import { useAppStore } from '../stores/app'
+import { formatDate } from '../utils'
 import type { BenchmarkJob } from '../types'
 
 const store = useAppStore()
@@ -244,7 +245,7 @@ onMounted(load)
               <td class="checkbox-cell"><input v-model="selectedIds" type="checkbox" :value="job.id" :aria-label="`选择 ${job.name}`" /></td>
               <td><strong>{{ job.name }}</strong></td>
               <td>{{ targetName(job) }}</td>
-              <td>{{ new Date(job.created_at).toLocaleString() }}</td>
+              <td>{{ formatDate(job.created_at) }}</td>
               <td><StatusBadge :status="job.status" /></td>
             </tr>
           </tbody>

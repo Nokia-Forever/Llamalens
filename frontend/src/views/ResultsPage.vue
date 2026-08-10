@@ -6,6 +6,7 @@ import { api, jsonBody } from '../api'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
+import { formatDate } from '../utils'
 import type { BenchmarkAttempt, BenchmarkAttemptDetail, BenchmarkJob, BenchmarkServiceUnit } from '../types'
 
 const store = useAppStore()
@@ -263,7 +264,7 @@ function clearTaskFilter() {
           <tbody>
             <tr v-for="job in filtered" :key="job.id" tabindex="0" :class="{ selected: selected?.id === job.id }" @click="selectJob(job.id)" @keydown.enter="selectJob(job.id)">
               <td class="checkbox-cell" @click.stop><input v-model="selectedIds" type="checkbox" :value="job.id" :aria-label="`选择 ${job.name}`" /></td>
-              <td><strong>{{ job.name }}</strong><small>{{ new Date(job.created_at).toLocaleString() }}</small></td>
+              <td><strong>{{ job.name }}</strong><small>{{ formatDate(job.created_at) }}</small></td>
               <td>{{ targetName(job) }}</td>
               <td>{{ format(metric(job, 'ttft_ms')) }} ms</td>
               <td>{{ format(metric(job, 'prefill_tps')) }} tok/s</td>

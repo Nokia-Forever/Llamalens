@@ -6,6 +6,7 @@ import MetricBlock from '../components/MetricBlock.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
+import { formatDate } from '../utils'
 import type { BenchmarkJob, LlamaService, Profile } from '../types'
 
 const store = useAppStore()
@@ -80,7 +81,7 @@ onMounted(load)
       <div v-if="!benchmarks.length" class="empty-state">还没有测试记录。</div>
       <div v-else class="compact-list">
         <RouterLink v-for="job in benchmarks.slice(0, 5)" :key="job.id" to="/results" class="compact-row">
-          <div><strong>{{ job.name }}</strong><span>{{ job.model_alias || '未指定模型' }} · {{ new Date(job.created_at).toLocaleString() }}</span></div>
+          <div><strong>{{ job.name }}</strong><span>{{ job.model_alias || '未指定模型' }} · {{ formatDate(job.created_at) }}</span></div>
           <StatusBadge :status="job.status" />
         </RouterLink>
       </div>

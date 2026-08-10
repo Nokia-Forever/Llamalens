@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BenchmarkJob } from '../../types'
+import { formatDate } from '../../utils'
 import { formatMetric, getMetricStat, STAT_LABELS, targetName, type MetricConfig, type StatKey } from '../../metricsStats'
 
 const props = defineProps<{
@@ -52,7 +53,7 @@ function cellClass(value: number | null): string {
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="row.job.id" :class="{ 'stat-anomaly': isAnomalous(row.job) }">
-          <td><strong>{{ row.job.name }}</strong><small>{{ new Date(row.job.created_at).toLocaleString() }}</small></td>
+          <td><strong>{{ row.job.name }}</strong><small>{{ formatDate(row.job.created_at) }}</small></td>
           <td>{{ targetName(row.job) }}</td>
           <td v-for="(value, index) in row.cells" :key="index" :class="cellClass(value)">{{ formatMetric(value) }}</td>
         </tr>

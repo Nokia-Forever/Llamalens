@@ -15,6 +15,7 @@ import { api, jsonBody } from '../api'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
+import { formatDate } from '../utils'
 import type { BenchmarkTask, TaskQueueState } from '../types'
 
 const store = useAppStore()
@@ -178,8 +179,7 @@ function editTask(taskId: string) {
 }
 
 function formatTime(value: string | null) {
-  if (!value) return 'N/A'
-  return new Date(value).toLocaleString()
+  return formatDate(value)
 }
 
 function statusLabel(status: string | null) {
