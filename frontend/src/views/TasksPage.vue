@@ -236,10 +236,14 @@ onBeforeUnmount(() => {
       <PageSection title="执行队列" description="全局串行调度：一次只执行一个任务。首个任务立即执行（不等间隔），后续每个任务完成后等待 interval ms 再启动。">
         <template #actions>
           <div class="inline-actions queue-controls">
-            <label class="field compact-field">
-              <span>间隔 ms</span>
-              <input v-model.number="intervalInput" type="number" min="0" step="100" @change="saveInterval" :disabled="acting" />
-            </label>
+            <div class="interval-input-group">
+              <label class="interval-label" for="interval-input">任务间隔</label>
+              <div class="input-with-suffix">
+                <input id="interval-input" v-model.number="intervalInput" type="number" min="0" step="100" @change="saveInterval" :disabled="acting" placeholder="0" />
+                <span class="input-suffix">ms</span>
+              </div>
+              <small class="interval-hint">上个任务完成后等待，首个不等待</small>
+            </div>
             <button v-if="canStart" class="button primary" :disabled="acting" @click="startQueue"><IconPlayerPlay :size="17" />开始队列</button>
             <button v-if="canPause" class="button secondary" :disabled="acting" @click="pauseQueue"><IconPlayerPause :size="17" />暂停</button>
             <button v-if="isStopping" class="button secondary" disabled><IconPlayerStop :size="17" />停止中…</button>
@@ -290,10 +294,14 @@ onBeforeUnmount(() => {
 .row-actions { display: flex; gap: 6px; }
 .button.compact { min-height: 30px; padding: 0 8px; font-size: 12px; }
 .muted-text { color: var(--muted); font-size: 12px; }
-.queue-controls { align-items: center; gap: 10px; }
-.compact-field { display: flex; flex-direction: column; gap: 2px; }
-.compact-field span { font-size: 11px; color: var(--muted); }
-.compact-field input { width: 90px; }
+.queue-controls { align-items: flex-end; gap: 10px; }
+.interval-input-group { display: flex; flex-direction: column; gap: 3px; }
+.interval-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.input-with-suffix { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); transition: border-color .14s, box-shadow .14s; }
+.input-with-suffix:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.input-with-suffix input { width: 110px; min-height: 36px; padding: 0 10px; border: 0; outline: none; background: transparent; color: var(--text); font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+.input-suffix { display: flex; align-items: center; padding: 0 10px; background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 600; border-left: 1px solid var(--line); }
+.interval-hint { font-size: 11px; color: var(--muted); }
 .queue-status-strip { display: flex; align-items: center; gap: 16px; padding: 0 0 14px; }
 .queue-status-badge { display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
 .qs-idle { background: var(--surface-3); color: var(--muted); }
