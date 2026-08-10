@@ -95,15 +95,15 @@ async function loadTask(taskId: string) {
     serviceId.value = task.service_id
     modelAlias.value = task.model_alias
     const config = task.config as Record<string, unknown>
-    form.prompt = String(config.prompt || '')
-    form.max_tokens = Number(config.max_tokens || 256)
-    form.timeout_seconds = Number(config.timeout_seconds || 300)
-    form.temperature = Number(config.temperature || 0)
+    form.prompt = String(config.prompt ?? '')
+    form.max_tokens = Number(config.max_tokens ?? 256)
+    form.timeout_seconds = Number(config.timeout_seconds ?? 300)
+    form.temperature = Number(config.temperature ?? 0)
     form.cache_prompt = Boolean(config.cache_prompt)
-    form.warmup_runs = Number(config.warmup_runs || 1)
-    form.repeat_runs = Number(config.repeat_runs || 3)
-    form.repeat_delay_ms = Number(config.repeat_delay_ms || 0)
-    form.concurrency = Number(config.concurrency || 1)
+    form.warmup_runs = Number(config.warmup_runs ?? 1)
+    form.repeat_runs = Number(config.repeat_runs ?? 3)
+    form.repeat_delay_ms = Number(config.repeat_delay_ms ?? 0)
+    form.concurrency = Number(config.concurrency ?? 1)
     if (config.seed != null) seedText.value = String(config.seed)
     else seedText.value = ''
     const stopArr = config.stop as string[] | undefined
