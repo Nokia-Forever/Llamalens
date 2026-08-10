@@ -368,7 +368,7 @@ class QueueScheduler:
             return
 
         try:
-            job = create_run_for_task(db, task, q.session_id)
+            job = create_run_for_task(db, task, q.session_id, q.interval_ms)
         except Exception as exc:
             job = BenchmarkJob(
                 id=str(uuid.uuid4()),

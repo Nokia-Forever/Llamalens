@@ -110,7 +110,7 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
     return job
 
 
-def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None) -> BenchmarkJob:
+def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None, queue_interval_ms: int = 0) -> BenchmarkJob:
     stored_config = json.loads(task.config_json)
     payload = BenchmarkCreate(
         name=task.name,
@@ -119,6 +119,7 @@ def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None
         **stored_config,
     )
     config_payload, profile_id = _build_benchmark_config(db, payload)
+    config_payload["queue_interval_ms"] = max(0, int(queue_interval_ms))
     job = BenchmarkJob(
         id=str(uuid.uuid4()),
         name=payload.name,
@@ -597,6 +598,10 @@ def _run_job_locked(job_id: str) -> None:
             if _is_cancelled(job_id):
                 break
             ordinal = _run_wave(job_id, settings, config, True, ordinal)
+        if config.warmup_runs > 0 and not _is_cancelled(job_id):
+            queue_interval_ms = int(raw_config.get("queue_interval_ms") or 0)
+            if queue_interval_ms > 0:
+                _wait_repeat_delay(job_id, queue_interval_ms)
         for repeat_index in range(config.repeat_runs):
             if _is_cancelled(job_id):
                 break
