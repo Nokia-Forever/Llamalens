@@ -25,6 +25,7 @@ const tasks = ref<BenchmarkTask[]>([])
 const loadingTasks = ref(true)
 const queue = ref<TaskQueueState | null>(null)
 const intervalInput = ref(0)
+const intervalFocused = ref(false)
 const acting = ref(false)
 let queueTimer: number | undefined
 const dragItemId = ref<string | null>(null)
@@ -52,7 +53,7 @@ async function loadTasks() {
 async function loadQueue() {
   try {
     queue.value = await api<TaskQueueState>('/queue')
-    intervalInput.value = queue.value.interval_ms
+    if (!intervalFocused.value) intervalInput.value = queue.value.interval_ms
   } catch (error) {
     store.notify('error', error instanceof Error ? error.message : '加载队列状态失败')
   }
@@ -71,6 +72,11 @@ async function saveInterval() {
   } catch (error) {
     store.notify('error', error instanceof Error ? error.message : '更新间隔失败')
   }
+}
+
+async function onIntervalBlur() {
+  intervalFocused.value = false
+  await saveInterval()
 }
 
 async function startQueue() {
@@ -239,7 +245,7 @@ onBeforeUnmount(() => {
             <div class="interval-input-group">
               <label class="interval-label" for="interval-input">任务间隔</label>
               <div class="input-with-suffix">
-                <input id="interval-input" v-model.number="intervalInput" type="number" min="0" step="100" @change="saveInterval" :disabled="acting" placeholder="0" />
+                <input id="interval-input" v-model.number="intervalInput" type="number" min="0" step="100" @focus="intervalFocused = true" @blur="onIntervalBlur" :disabled="acting" placeholder="0" />
                 <span class="input-suffix">ms</span>
               </div>
               <small class="interval-hint">上个任务完成后等待，首个不等待</small>
