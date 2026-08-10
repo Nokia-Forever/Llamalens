@@ -6,6 +6,7 @@ import {
   IconAdjustments,
   IconBox,
   IconChartHistogram,
+  IconChartLine,
   IconGauge,
   IconListCheck,
   IconMoon,
@@ -25,6 +26,7 @@ const nav = [
   { to: '/benchmark', label: '新建任务', icon: IconActivity },
   { to: '/tasks', label: '任务', icon: IconListCheck },
   { to: '/results', label: '结果', icon: IconChartHistogram },
+  { to: '/observation', label: '观测', icon: IconChartLine },
   { to: '/settings', label: '设置', icon: IconSettings },
 ]
 

@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { IconChevronDown, IconDownload, IconRefresh, IconSearch, IconTrash, IconX } from '@tabler/icons-vue'
 import { api, jsonBody } from '../api'
-import MetricsChart from '../components/MetricsChart.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
@@ -37,7 +36,6 @@ const filtered = computed(() => jobs.value.filter((job) => {
   return haystack.includes(query.value.toLowerCase()) && (status.value === 'all' || job.status === status.value)
 }))
 const selectedJobs = computed(() => jobs.value.filter((job) => selectedIds.value.includes(job.id)))
-const trendJobs = computed(() => selectedJobs.value.filter((job) => job.status === 'succeeded'))
 const allFilteredSelected = computed(() => filtered.value.length > 0 && filtered.value.every((job) => selectedIds.value.includes(job.id)))
 const selectedCanDelete = computed(() => selectedJobs.value.length > 0 && selectedJobs.value.every((job) => terminalStatuses.has(job.status)))
 const selectableAttempts = computed(() => selected.value?.attempts?.filter((attempt) => !attempt.warmup && attempt.status === 'succeeded') || [])
@@ -277,11 +275,6 @@ function clearTaskFilter() {
           </tbody>
         </table>
       </div>
-    </PageSection>
-
-    <PageSection v-if="jobs.length" title="趋势图" description="趋势图只使用已勾选的成功测试；TTFT 使用右轴，Prefill 与 Decode 使用左轴。">
-      <MetricsChart v-if="trendJobs.length" :jobs="trendJobs" />
-      <div v-else class="empty-state compact">请在上方勾选至少一个成功的测试结果，趋势图会按勾选项生成。</div>
     </PageSection>
 
     <PageSection v-if="selected" title="测试详情" description="指标使用已选正式成功请求的算术平均值；中位数会保留并随 CSV 一起导出。">

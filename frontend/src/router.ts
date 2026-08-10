@@ -10,6 +10,7 @@ export const router = createRouter({
     { path: '/benchmark', component: () => import('./views/BenchmarkPage.vue'), meta: { title: '新建/编辑任务' } },
     { path: '/tasks', component: () => import('./views/TasksPage.vue'), meta: { title: '任务' } },
     { path: '/results', component: () => import('./views/ResultsPage.vue'), meta: { title: '结果' } },
+    { path: '/observation', component: () => import('./views/ObservationPage.vue'), meta: { title: '观测' } },
     { path: '/settings', component: () => import('./views/SettingsPage.vue'), meta: { title: '设置' } },
   ],
 })
