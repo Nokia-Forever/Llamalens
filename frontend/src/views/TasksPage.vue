@@ -30,6 +30,7 @@ const intervalFocused = ref(false)
 const acting = ref(false)
 let queueTimer: number | undefined
 const dragItemId = ref<string | null>(null)
+const enqueueDialog = ref<{ open: boolean; taskId: string; taskName: string; runName: string }>({ open: false, taskId: '', taskName: '', runName: '' })
 
 const queueStatus = computed(() => queue.value?.status || 'idle')
 const isRunning = computed(() => queueStatus.value === 'running')
@@ -105,11 +106,18 @@ async function pauseQueue() {
   }
 }
 
-async function enqueue(taskId: string) {
+function openEnqueueDialog(taskId: string, taskName: string) {
+  enqueueDialog.value = { open: true, taskId, taskName, runName: taskName }
+}
+
+async function confirmEnqueue() {
+  const dialog = enqueueDialog.value
+  if (!dialog.taskId) return
   try {
-    await api('/queue/items', { method: 'POST', ...jsonBody({ task_id: taskId, position: 'tail' }) })
-    store.notify('success', '已加入队列末尾')
+    await api('/queue/items', { method: 'POST', ...jsonBody({ task_id: dialog.taskId, position: 'tail', run_name: dialog.runName.trim() || null }) })
+    store.notify('success', `已加入队列：${dialog.runName.trim() || dialog.taskName}`)
     await loadQueue()
+    dialog.open = false
   } catch (error) {
     store.notify('error', error instanceof Error ? error.message : '加入队列失败')
   }
@@ -226,7 +234,7 @@ onBeforeUnmount(() => {
                 <td>{{ task.run_count }}</td>
                 <td><small>{{ formatTime(task.updated_at) }}</small></td>
                 <td class="row-actions">
-                  <button class="button secondary compact" title="加入队列" @click="enqueue(task.id)">入队</button>
+                  <button class="button secondary compact" title="加入队列" @click="openEnqueueDialog(task.id, task.name)">入队</button>
                   <button class="button secondary compact" title="查看运行历史" @click="viewHistory(task.id)">历史</button>
                   <button class="button secondary compact" title="编辑任务" @click="editTask(task.id)">编辑</button>
                   <button class="button danger compact" title="删除任务" @click="deleteTask(task.id, task.name)"><IconTrash :size="15" /></button>
@@ -266,11 +274,14 @@ onBeforeUnmount(() => {
 
         <div v-if="currentItem" class="current-run-card">
           <div class="current-run-info">
-            <strong>{{ currentItem.task_name }}</strong>
-            <StatusBadge v-if="currentItem.run" :status="currentItem.run.status" />
-            <small>{{ currentItem.run?.id?.slice(0, 8) || '' }}</small>
+            <div class="run-name-line">
+              <strong>{{ currentItem.run_name || currentItem.task_name }}</strong>
+              <StatusBadge v-if="currentItem.run" :status="currentItem.run.status" />
+              <small>{{ currentItem.run?.id?.slice(0, 8) || '' }}</small>
+            </div>
+            <small class="task-label">任务: {{ currentItem.task_name }}</small>
           </div>
-          <button class="button danger compact" @click="deleteItem(currentItem.id, currentItem.task_name, true)"><IconPlayerStop :size="15" />停止并删除</button>
+          <button class="button danger compact" @click="deleteItem(currentItem.id, currentItem.run_name || currentItem.task_name, true)"><IconPlayerStop :size="15" />停止并删除</button>
         </div>
 
         <div v-if="waitingItems.length" class="queue-list">
@@ -278,16 +289,31 @@ onBeforeUnmount(() => {
             <span class="queue-order">{{ index + 1 }}</span>
             <IconArrowsMoveVertical :size="16" class="drag-handle" />
             <div class="queue-item-info">
-              <strong>{{ item.task_name }}</strong>
-              <small>入队 {{ formatTime(item.enqueued_at) }}</small>
+              <strong>{{ item.run_name || item.task_name }}</strong>
+              <small>任务: {{ item.task_name }} · 入队 {{ formatTime(item.enqueued_at) }}</small>
             </div>
-            <button class="button danger compact" @click="deleteItem(item.id, item.task_name, false)"><IconTrash :size="15" /></button>
+            <button class="button danger compact" @click="deleteItem(item.id, item.run_name || item.task_name, false)"><IconTrash :size="15" /></button>
           </div>
         </div>
         <div v-else-if="!currentItem && queueStatus === 'idle'" class="empty-state compact">队列为空。开始队列后，首个任务将立即执行（不等待间隔）。</div>
         <div v-else-if="!currentItem" class="empty-state compact">等待队列中没有任务。</div>
       </PageSection>
     </template>
+
+    <div v-if="enqueueDialog.open" class="modal-overlay" @click.self="enqueueDialog.open = false">
+      <div class="modal-card">
+        <h3>加入队列</h3>
+        <p class="modal-hint">为本次测试指定名称，留空则使用任务名称「{{ enqueueDialog.taskName }}」。</p>
+        <label class="field">
+          <span>测试名称</span>
+          <input v-model="enqueueDialog.runName" type="text" maxlength="200" placeholder="留空则使用任务名称" @keyup.enter="confirmEnqueue" />
+        </label>
+        <div class="modal-actions">
+          <button class="button secondary" @click="enqueueDialog.open = false">取消</button>
+          <button class="button primary" @click="confirmEnqueue">加入队列</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -328,4 +354,11 @@ onBeforeUnmount(() => {
 .drag-handle { color: var(--muted); cursor: grab; }
 .queue-item-info { flex: 1; display: flex; flex-direction: column; }
 .queue-item-info small { color: var(--muted); font-size: 11px; }
+.run-name-line { display: flex; align-items: center; gap: 10px; }
+.task-label { color: var(--muted); font-size: 11px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 100; }
+.modal-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; width: 420px; max-width: 90vw; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+.modal-card h3 { margin: 0 0 6px; font-size: 16px; }
+.modal-hint { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 </style>

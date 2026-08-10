@@ -107,6 +107,12 @@ def _migrate_legacy_columns() -> None:
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_model_alias ON benchmark_jobs (model_alias)"))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_task_id ON benchmark_jobs (task_id)"))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_queue_session_id ON benchmark_jobs (queue_session_id)"))
+    inspector = inspect(engine)
+    if "task_queue_items" in inspector.get_table_names():
+        item_columns = {column["name"] for column in inspector.get_columns("task_queue_items")}
+        if "run_name" not in item_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE task_queue_items ADD COLUMN run_name VARCHAR(200)"))
 
 
 def get_db():

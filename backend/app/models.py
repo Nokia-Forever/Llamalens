@@ -227,6 +227,7 @@ class TaskQueueItem(Base):
     task_id: Mapped[str] = mapped_column(ForeignKey("benchmark_tasks.id", ondelete="CASCADE"), index=True)
     order_index: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(32), default="waiting", index=True)
+    run_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)

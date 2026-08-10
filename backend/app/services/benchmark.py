@@ -110,7 +110,7 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
     return job
 
 
-def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None, queue_interval_ms: int = 0) -> BenchmarkJob:
+def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None, queue_interval_ms: int = 0, run_name: str | None = None) -> BenchmarkJob:
     stored_config = json.loads(task.config_json)
     payload = BenchmarkCreate(
         name=task.name,
@@ -122,7 +122,7 @@ def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None
     config_payload["queue_interval_ms"] = max(0, int(queue_interval_ms))
     job = BenchmarkJob(
         id=str(uuid.uuid4()),
-        name=payload.name,
+        name=(run_name.strip() if run_name and run_name.strip() else payload.name),
         service_id=payload.service_id,
         model_alias=payload.model_alias,
         profile_id=profile_id,
@@ -132,6 +132,16 @@ def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None
         config_json=json.dumps(config_payload, ensure_ascii=False),
     )
     db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def rename_benchmark(db: Session, job_id: str, new_name: str) -> BenchmarkJob:
+    job = db.get(BenchmarkJob, job_id)
+    if job is None:
+        raise ValueError("测试记录不存在")
+    job.name = new_name.strip()
     db.commit()
     db.refresh(job)
     return job

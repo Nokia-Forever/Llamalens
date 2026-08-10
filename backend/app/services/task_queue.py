@@ -73,6 +73,7 @@ def _serialize_item(db: Session, item: TaskQueueItem) -> dict[str, Any]:
         "id": item.id,
         "task_id": item.task_id,
         "task_name": task.name if task else "(已删除)",
+        "run_name": item.run_name,
         "order_index": item.order_index,
         "status": item.status,
         "enqueued_at": item.enqueued_at,
@@ -174,7 +175,7 @@ def update_queue_settings(
     return serialize_queue(db, q)
 
 
-def enqueue_item(db: Session, task_id: str, position: str | int = "tail") -> dict[str, Any]:
+def enqueue_item(db: Session, task_id: str, position: str | int = "tail", run_name: str | None = None) -> dict[str, Any]:
     _ensure_queue_row(db)
     task = db.get(BenchmarkTask, task_id)
     if task is None:
@@ -207,11 +208,12 @@ def enqueue_item(db: Session, task_id: str, position: str | int = "tail") -> dic
         task_id=task_id,
         order_index=order_index,
         status="waiting",
+        run_name=(run_name.strip() if run_name and run_name.strip() else None),
         enqueued_at=datetime.now(timezone.utc),
     )
     db.add(item)
     db.flush()
-    _record_history(db, item.id, task_id, "enqueued", detail={"order_index": order_index})
+    _record_history(db, item.id, task_id, "enqueued", detail={"order_index": order_index, "run_name": item.run_name})
     db.commit()
     db.refresh(item)
     get_scheduler().notify()
@@ -368,11 +370,11 @@ class QueueScheduler:
             return
 
         try:
-            job = create_run_for_task(db, task, q.session_id, q.interval_ms)
+            job = create_run_for_task(db, task, q.session_id, q.interval_ms, item.run_name)
         except Exception as exc:
             job = BenchmarkJob(
                 id=str(uuid.uuid4()),
-                name=task.name,
+                name=(item.run_name if item.run_name else task.name),
                 service_id=task.service_id,
                 model_alias=task.model_alias,
                 task_id=task.id,

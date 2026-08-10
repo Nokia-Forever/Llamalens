@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import BenchmarkAttempt, BenchmarkJob, TaskQueue
-from app.schemas import BenchmarkBulkDelete, BenchmarkCreate
-from app.services.benchmark import benchmark_service_unit, cancel_benchmark, create_benchmark_job, extract_output_text
+from app.schemas import BenchmarkBulkDelete, BenchmarkCreate, BenchmarkRename
+from app.services.benchmark import benchmark_service_unit, cancel_benchmark, create_benchmark_job, extract_output_text, rename_benchmark
 
 
 router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
@@ -168,6 +168,14 @@ def cancel(job_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Benchmark 不存在")
     cancel_benchmark(job_id)
     return {"ok": True}
+
+
+@router.patch("/{job_id}/rename")
+def rename(job_id: str, payload: BenchmarkRename, db: Session = Depends(get_db)):
+    try:
+        return _serialize(rename_benchmark(db, job_id, payload.name))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.delete("/{job_id}")

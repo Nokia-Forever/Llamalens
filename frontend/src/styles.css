@@ -226,6 +226,13 @@ code, pre, .metric-block strong, .data-table td:not(:first-child) { font-family:
 .metrics-chart { width: 100%; min-height: 360px; }
 .result-summary-metrics { margin-bottom: 14px; }
 .benchmark-detail-strip { margin-bottom: 14px; }
+.detail-name-line { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.detail-name-line strong { font-size: 15px; }
+.icon-text-button { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--muted); font-size: 12px; cursor: pointer; transition: color .14s, border-color .14s; }
+.icon-text-button:hover { color: var(--accent); border-color: var(--accent); }
+.rename-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.rename-input { flex: 1; min-height: 36px; padding: 0 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--surface); color: var(--text); outline: none; }
+.button.compact { min-height: 30px; padding: 0 10px; font-size: 12px; }
 .attempt-selection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; color: var(--muted); font-size: 11px; }
 .attempt-checkbox { display: flex; align-items: center; justify-content: center; }
 .attempt-detail-list { display: grid; gap: 8px; }

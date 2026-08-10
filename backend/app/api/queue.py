@@ -34,7 +34,7 @@ def patch_queue(payload: QueuePatch, db: Session = Depends(get_db)):
 @router.post("/items")
 def add_item(payload: QueueItemCreate, db: Session = Depends(get_db)):
     try:
-        return task_queue.enqueue_item(db, payload.task_id, payload.position)
+        return task_queue.enqueue_item(db, payload.task_id, payload.position, payload.run_name)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

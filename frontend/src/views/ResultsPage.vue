@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { IconChevronDown, IconDownload, IconRefresh, IconSearch, IconTrash, IconX } from '@tabler/icons-vue'
+import { IconChevronDown, IconDownload, IconEdit, IconRefresh, IconSearch, IconTrash, IconX } from '@tabler/icons-vue'
 import { api, jsonBody } from '../api'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -17,6 +17,9 @@ const selected = ref<BenchmarkJob | null>(null)
 const selectedIds = ref<string[]>([])
 const query = ref('')
 const status = ref('all')
+const editingName = ref(false)
+const nameInput = ref('')
+const savingName = ref(false)
 const loading = ref(true)
 const taskFilterId = computed(() => (route.query.task_id as string) || '')
 const attemptDetails = ref<Record<number, BenchmarkAttemptDetail>>({})
@@ -71,6 +74,29 @@ async function selectJob(id: string) {
   selectedAttemptIds.value = saved
     ? saved.filter((attemptId) => selectableAttempts.value.some((attempt) => attempt.id === attemptId))
     : selectableAttempts.value.map((attempt) => attempt.id)
+}
+
+function startRename() {
+  if (!selected.value) return
+  nameInput.value = selected.value.name
+  editingName.value = true
+}
+
+async function saveRename() {
+  if (!selected.value || !nameInput.value.trim()) return
+  savingName.value = true
+  try {
+    const updated = await api<BenchmarkJob>(`/benchmarks/${selected.value.id}/rename`, { method: 'PATCH', ...jsonBody({ name: nameInput.value.trim() }) })
+    selected.value = updated
+    const target = jobs.value.find((job) => job.id === updated.id)
+    if (target) target.name = updated.name
+    editingName.value = false
+    store.notify('success', '测试名称已更新')
+  } catch (error) {
+    store.notify('error', error instanceof Error ? error.message : '更新名称失败')
+  } finally {
+    savingName.value = false
+  }
 }
 
 function toggleFiltered(event: Event) {
@@ -280,8 +306,18 @@ function clearTaskFilter() {
 
     <PageSection v-if="selected" title="测试详情" description="指标使用已选正式成功请求的算术平均值；中位数会保留并随 CSV 一起导出。">
       <template #actions>
+        <button class="button secondary" @click="startRename"><IconEdit :size="17" />修改名称</button>
         <button v-if="terminalStatuses.has(selected.status)" class="button danger" @click="deleteJobs([selected.id])"><IconTrash :size="17" />删除此测试</button>
       </template>
+      <div v-if="editingName" class="rename-row">
+        <input v-model="nameInput" type="text" maxlength="200" class="rename-input" @keyup.enter="saveRename" @keyup.esc="editingName = false" />
+        <button class="button primary compact" :disabled="savingName || !nameInput.trim()" @click="saveRename">保存</button>
+        <button class="button secondary compact" @click="editingName = false">取消</button>
+      </div>
+      <div v-else class="detail-name-line">
+        <strong>{{ selected.name }}</strong>
+        <button class="icon-text-button" @click="startRename"><IconEdit :size="14" />改名</button>
+      </div>
       <div class="detail-strip benchmark-detail-strip">
         <span><small>Job</small><strong>{{ selected.id }}</strong></span>
         <span><small>目标</small><strong>{{ targetName(selected) }}</strong></span>

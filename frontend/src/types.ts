@@ -140,6 +140,7 @@ export interface QueueItem {
   id: string
   task_id: string
   task_name: string
+  run_name: string | null
   order_index: number
   status: string
   enqueued_at: string

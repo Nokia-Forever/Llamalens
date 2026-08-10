@@ -191,10 +191,15 @@ class QueuePatch(BaseModel):
 class QueueItemCreate(BaseModel):
     task_id: str
     position: Literal["tail", "head"] | int = "tail"
+    run_name: str | None = Field(default=None, max_length=200)
 
 
 class ReorderInput(BaseModel):
     item_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class BenchmarkRename(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
 
 
 class DownloadCreate(BaseModel):
