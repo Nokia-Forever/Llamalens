@@ -108,6 +108,7 @@ export interface BenchmarkJob {
   service_id: string | null
   model_alias: string | null
   profile_id: string | null
+  task_id: string | null
   status: string
   config: Record<string, unknown>
   summary: {
@@ -120,6 +121,54 @@ export interface BenchmarkJob {
   started_at: string | null
   finished_at: string | null
   attempts?: BenchmarkAttempt[]
+}
+
+export interface BenchmarkTask {
+  id: string
+  name: string
+  service_id: string
+  model_alias: string
+  config: Record<string, unknown>
+  last_run_status: string | null
+  run_count: number
+  created_at: string
+  updated_at: string
+  recent_runs?: BenchmarkJob[]
+}
+
+export interface QueueItem {
+  id: string
+  task_id: string
+  task_name: string
+  order_index: number
+  status: string
+  enqueued_at: string
+  started_at: string | null
+  last_run_id: string | null
+  run?: {
+    id: string
+    status: string
+    name: string
+    error: string | null
+    summary: Record<string, unknown>
+  }
+}
+
+export interface TaskQueueState {
+  id: number
+  status: 'idle' | 'running' | 'paused' | 'stopping'
+  interval_ms: number
+  cancel_timeout_ms: number
+  current_item_id: string | null
+  next_dispatch_at: string | null
+  session_id: string | null
+  items: QueueItem[]
+  current_item: QueueItem | null
+  session_stats: {
+    successes: number
+    failures: number
+    canceled: number
+  }
 }
 
 export interface LaunchModel {

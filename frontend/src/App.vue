@@ -7,6 +7,7 @@ import {
   IconBox,
   IconChartHistogram,
   IconGauge,
+  IconListCheck,
   IconMoon,
   IconServer,
   IconSettings,
@@ -21,7 +22,8 @@ const nav = [
   { to: '/services', label: 'Services', icon: IconServer },
   { to: '/models', label: '模型库', icon: IconBox },
   { to: '/profiles', label: 'Profiles', icon: IconAdjustments },
-  { to: '/benchmark', label: 'Benchmark', icon: IconActivity },
+  { to: '/benchmark', label: '新建任务', icon: IconActivity },
+  { to: '/tasks', label: '任务', icon: IconListCheck },
   { to: '/results', label: '结果', icon: IconChartHistogram },
   { to: '/settings', label: '设置', icon: IconSettings },
 ]

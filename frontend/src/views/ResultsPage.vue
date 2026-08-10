@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { IconChevronDown, IconDownload, IconRefresh, IconSearch, IconTrash } from '@tabler/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { IconChevronDown, IconDownload, IconRefresh, IconSearch, IconTrash, IconX } from '@tabler/icons-vue'
 import { api, jsonBody } from '../api'
 import MetricsChart from '../components/MetricsChart.vue'
 import PageSection from '../components/PageSection.vue'
@@ -9,12 +10,15 @@ import { useAppStore } from '../stores/app'
 import type { BenchmarkAttempt, BenchmarkAttemptDetail, BenchmarkJob, BenchmarkServiceUnit } from '../types'
 
 const store = useAppStore()
+const route = useRoute()
+const router = useRouter()
 const jobs = ref<BenchmarkJob[]>([])
 const selected = ref<BenchmarkJob | null>(null)
 const selectedIds = ref<string[]>([])
 const query = ref('')
 const status = ref('all')
 const loading = ref(true)
+const taskFilterId = computed(() => (route.query.task_id as string) || '')
 const attemptDetails = ref<Record<number, BenchmarkAttemptDetail>>({})
 const attemptLoading = ref<number[]>([])
 const serviceUnit = ref<BenchmarkServiceUnit | null>(null)
@@ -43,7 +47,8 @@ const allAttemptsSelected = computed(() => selectableAttempts.value.length > 0 &
 async function load() {
   loading.value = true
   try {
-    jobs.value = await api<BenchmarkJob[]>('/benchmarks')
+    const path = taskFilterId.value ? `/benchmarks?task_id=${taskFilterId.value}` : '/benchmarks'
+    jobs.value = await api<BenchmarkJob[]>(path)
     const existing = new Set(jobs.value.map((job) => job.id))
     selectedIds.value = selectedIds.value.filter((id) => existing.has(id))
     if (selected.value && existing.has(selected.value.id)) await selectJob(selected.value.id)
@@ -232,6 +237,10 @@ function onAttemptToggle(event: Event, attemptId: number) {
 }
 
 onMounted(load)
+
+function clearTaskFilter() {
+  router.push({ path: '/results' })
+}
 </script>
 
 <template>
@@ -247,6 +256,7 @@ onMounted(load)
           <button class="button primary" :disabled="!selectedJobs.length" @click="exportCsv"><IconDownload :size="17" />导出选中测试 CSV</button>
         </div>
       </template>
+      <div v-if="taskFilterId" class="filter-chip"><span>已按 Task 筛选: {{ taskFilterId.slice(0, 8) }}…</span><button class="icon-button" @click="clearTaskFilter"><IconX :size="15" /></button></div>
       <div v-if="loading" class="skeleton-stack"><div /><div /></div>
       <div v-else-if="!filtered.length" class="empty-state">没有符合筛选条件的测试结果。</div>
       <div v-else class="data-table-wrap">

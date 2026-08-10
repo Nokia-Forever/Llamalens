@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import BenchmarkAttempt, BenchmarkJob
+from app.models import BenchmarkAttempt, BenchmarkJob, TaskQueue
 from app.schemas import BenchmarkBulkDelete, BenchmarkCreate
 from app.services.benchmark import benchmark_service_unit, cancel_benchmark, create_benchmark_job, extract_output_text
 
@@ -42,6 +42,7 @@ def _serialize(job: BenchmarkJob, include_attempts: bool = False):
         "service_id": job.service_id,
         "model_alias": job.model_alias,
         "profile_id": job.profile_id,
+        "task_id": job.task_id,
         "status": job.status,
         "config": config,
         "summary": summary,
@@ -114,6 +115,9 @@ def _deletable_jobs(db: Session, ids: list[str]) -> tuple[list[str], list[Benchm
 
 @router.post("")
 def create(payload: BenchmarkCreate, db: Session = Depends(get_db)):
+    q = db.get(TaskQueue, 1)
+    if q and (q.status in ("running", "paused", "stopping") or q.current_item_id is not None):
+        raise HTTPException(status_code=409, detail="任务队列正在运行，请先暂停队列或使用任务队列来执行 Benchmark")
     try:
         return _serialize(create_benchmark_job(db, payload))
     except ValueError as exc:
@@ -121,8 +125,11 @@ def create(payload: BenchmarkCreate, db: Session = Depends(get_db)):
 
 
 @router.get("")
-def list_jobs(db: Session = Depends(get_db)):
-    jobs = db.scalars(select(BenchmarkJob).order_by(BenchmarkJob.created_at.desc()).limit(200)).all()
+def list_jobs(task_id: str | None = None, db: Session = Depends(get_db)):
+    query = select(BenchmarkJob).order_by(BenchmarkJob.created_at.desc()).limit(200)
+    if task_id is not None:
+        query = query.where(BenchmarkJob.task_id == task_id)
+    jobs = db.scalars(query).all()
     return [_serialize(job) for job in jobs]
 
 

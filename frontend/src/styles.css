@@ -108,7 +108,9 @@ code, pre, .metric-block strong, .data-table td:not(:first-child) { font-family:
 
 .search-box { min-width: 260px; min-height: 36px; display: flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--surface); }
 .search-box.full { min-width: 0; margin-bottom: 10px; }
-.search-box input { min-height: 30px; padding: 0; border: 0; box-shadow: none !important; }
+.search-box input { min-height: 30px; padding: 0; box-shadow: none !important; }
+.filter-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px 4px 12px; margin-bottom: 10px; border: 1px solid var(--accent); border-radius: 20px; background: var(--accent-soft); color: var(--accent-strong); font-size: 12px; font-weight: 600; }
+.filter-chip .icon-button { min-height: 22px; min-width: 22px; padding: 2px; border-radius: 50%; }
 .compact-select { width: auto; min-width: 120px; }
 .path-list, .selected-args { display: grid; gap: 8px; }
 .path-row, .arg-edit-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }

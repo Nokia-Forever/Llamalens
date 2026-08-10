@@ -181,6 +181,8 @@ class BenchmarkJob(Base):
     service_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     model_alias: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     profile_id: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"), nullable=True, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    queue_session_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     config_json: Mapped[str] = mapped_column(Text)
     summary_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -189,6 +191,57 @@ class BenchmarkJob(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempts: Mapped[list["BenchmarkAttempt"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+
+
+class BenchmarkTask(Base):
+    __tablename__ = "benchmark_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    service_id: Mapped[str] = mapped_column(String(36), index=True)
+    model_alias: Mapped[str] = mapped_column(String(200), default="")
+    config_json: Mapped[str] = mapped_column(Text)
+    last_run_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    run_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class TaskQueue(Base):
+    __tablename__ = "task_queue"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    status: Mapped[str] = mapped_column(String(32), default="idle", index=True)
+    interval_ms: Mapped[int] = mapped_column(Integer, default=0)
+    cancel_timeout_ms: Mapped[int] = mapped_column(Integer, default=60000)
+    current_item_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    next_dispatch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class TaskQueueItem(Base):
+    __tablename__ = "task_queue_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("benchmark_tasks.id", ondelete="CASCADE"), index=True)
+    order_index: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(32), default="waiting", index=True)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class TaskQueueHistory(Base):
+    __tablename__ = "task_queue_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    task_id: Mapped[str] = mapped_column(String(36), index=True)
+    action: Mapped[str] = mapped_column(String(32), index=True)
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class BenchmarkAttempt(Base):

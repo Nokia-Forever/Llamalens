@@ -147,6 +147,56 @@ class BenchmarkBulkDelete(BaseModel):
     ids: list[str] = Field(min_length=1, max_length=200)
 
 
+class TaskCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    service_id: str
+    model_alias: str = Field(min_length=1, max_length=200)
+    prompt: str = Field(min_length=1)
+    max_tokens: int = Field(default=256, ge=1, le=131072)
+    timeout_seconds: float = Field(default=300, gt=0, le=86400)
+    temperature: float = Field(default=0, ge=0, le=10)
+    seed: int | None = 42
+    stop: list[str] = Field(default_factory=list)
+    cache_prompt: bool = False
+    warmup_runs: int = Field(default=1, ge=0, le=100)
+    repeat_runs: int = Field(default=3, ge=1, le=100)
+    repeat_delay_ms: int = Field(default=0, ge=0, le=600000)
+    concurrency: int = Field(default=1, ge=1, le=128)
+    extra_params: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskUpdate(TaskCreate):
+    pass
+
+
+class TaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    service_id: str
+    model_alias: str
+    config: dict[str, Any]
+    last_run_status: str | None = None
+    run_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class QueuePatch(BaseModel):
+    status: Literal["start", "pause"] | None = None
+    interval_ms: int | None = Field(default=None, ge=0, le=86400000)
+    cancel_timeout_ms: int | None = Field(default=None, ge=1000, le=600000)
+
+
+class QueueItemCreate(BaseModel):
+    task_id: str
+    position: Literal["tail", "head"] | int = "tail"
+
+
+class ReorderInput(BaseModel):
+    item_ids: list[str] = Field(min_length=1, max_length=500)
+
+
 class DownloadCreate(BaseModel):
     url: str = Field(pattern=r"^https?://")
     target_root: str

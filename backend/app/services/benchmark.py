@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import BenchmarkAttempt, BenchmarkJob, LlamaService, Profile, ProfileVersion
+from app.models import BenchmarkAttempt, BenchmarkJob, BenchmarkTask, LlamaService, Profile, ProfileVersion
 from app.schemas import AppSettings, BenchmarkCreate, LaunchConfig, LlamaServiceCreate
 from app.services.job_control import EXECUTION_LOCK
 from app.services.settings_service import get_settings
@@ -29,7 +29,11 @@ _cancelled_jobs: set[str] = set()
 _cancel_lock = threading.Lock()
 
 
-def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
+def is_benchmark_active() -> bool:
+    return EXECUTION_LOCK.locked()
+
+
+def _build_benchmark_config(db: Session, payload: BenchmarkCreate) -> tuple[dict[str, Any], str | None]:
     if not payload.service_id:
         raise ValueError("请选择 Benchmark 目标服务")
     service = db.get(LlamaService, payload.service_id)
@@ -85,7 +89,11 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
         "runtime_config": applied_service.model_dump(mode="json"),
         "applied_launch_config": applied.model_dump(mode="json"),
     }
+    return config_payload, profile_id
 
+
+def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
+    config_payload, profile_id = _build_benchmark_config(db, payload)
     job = BenchmarkJob(
         id=str(uuid.uuid4()),
         name=payload.name,
@@ -100,6 +108,36 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
     db.refresh(job)
     BENCHMARK_EXECUTOR.submit(_run_job, job.id)
     return job
+
+
+def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None) -> BenchmarkJob:
+    stored_config = json.loads(task.config_json)
+    payload = BenchmarkCreate(
+        name=task.name,
+        service_id=task.service_id,
+        model_alias=task.model_alias,
+        **stored_config,
+    )
+    config_payload, profile_id = _build_benchmark_config(db, payload)
+    job = BenchmarkJob(
+        id=str(uuid.uuid4()),
+        name=payload.name,
+        service_id=payload.service_id,
+        model_alias=payload.model_alias,
+        profile_id=profile_id,
+        task_id=task.id,
+        queue_session_id=session_id,
+        status="queued",
+        config_json=json.dumps(config_payload, ensure_ascii=False),
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def run_benchmark_job(job_id: str) -> None:
+    _run_job(job_id)
 
 
 def benchmark_service_unit(db: Session, job: BenchmarkJob) -> dict[str, str]:

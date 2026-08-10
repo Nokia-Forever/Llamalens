@@ -9,11 +9,12 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import arguments, benchmarks, models, profiles, services, settings, system
+from app.api import arguments, benchmarks, models, profiles, queue, services, settings, system, tasks
 from app.database import SessionLocal, init_db
 from app.services.arguments import seed_builtin_catalog
 from app.services.llama_services import migrate_legacy_service
 from app.services.settings_service import get_settings
+from app.services import task_queue
 
 
 @asynccontextmanager
@@ -25,7 +26,10 @@ async def lifespan(_: FastAPI):
         migrate_legacy_service(db, get_settings(db))
     finally:
         db.close()
+    task_queue.recover_on_startup()
+    task_queue.get_scheduler().start()
     yield
+    task_queue.get_scheduler().stop()
 
 
 app = FastAPI(title="LlamaLens API", version="0.1.0", lifespan=lifespan)
@@ -51,7 +55,7 @@ def health():
     return {"status": "ok"}
 
 
-for router in [settings.router, system.router, services.router, arguments.router, models.router, profiles.router, benchmarks.router]:
+for router in [settings.router, system.router, services.router, arguments.router, models.router, profiles.router, benchmarks.router, tasks.router, queue.router]:
     app.include_router(router, prefix="/api/v1")
 
 

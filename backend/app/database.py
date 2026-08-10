@@ -95,12 +95,18 @@ def _migrate_legacy_columns() -> None:
             additions.append("ALTER TABLE benchmark_jobs ADD COLUMN service_id VARCHAR(36)")
         if "model_alias" not in benchmark_columns:
             additions.append("ALTER TABLE benchmark_jobs ADD COLUMN model_alias VARCHAR(200)")
+        if "task_id" not in benchmark_columns:
+            additions.append("ALTER TABLE benchmark_jobs ADD COLUMN task_id VARCHAR(36)")
+        if "queue_session_id" not in benchmark_columns:
+            additions.append("ALTER TABLE benchmark_jobs ADD COLUMN queue_session_id VARCHAR(36)")
         if additions:
             with engine.begin() as connection:
                 for statement in additions:
                     connection.execute(text(statement))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_service_id ON benchmark_jobs (service_id)"))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_model_alias ON benchmark_jobs (model_alias)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_task_id ON benchmark_jobs (task_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_benchmark_jobs_queue_session_id ON benchmark_jobs (queue_session_id)"))
 
 
 def get_db():
