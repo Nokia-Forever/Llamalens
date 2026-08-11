@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { IconArrowsSort, IconChartBar, IconChartDots, IconChartLine, IconDownload, IconGripVertical, IconRefresh, IconSearch, IconTable, IconX } from '@tabler/icons-vue'
+import { IconArrowsSort, IconChartBar, IconChartDots, IconChartLine, IconDownload, IconGripVertical, IconPlus, IconRefresh, IconSearch, IconTable, IconTrash, IconX } from '@tabler/icons-vue'
 import { api } from '../api'
 import ChartCard from '../components/charts/ChartCard.vue'
 import ComparisonBarChart from '../components/charts/ComparisonBarChart.vue'
 import PercentileRangeChart from '../components/charts/PercentileRangeChart.vue'
 import StatisticsTable from '../components/charts/StatisticsTable.vue'
-import TrendLineChart from '../components/charts/TrendLineChart.vue'
+import TrendLineChart, { type TrendGroup } from '../components/charts/TrendLineChart.vue'
 import MetricBlock from '../components/MetricBlock.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -49,6 +49,70 @@ const smooth = ref(true)
 const showLabel = ref(false)
 const includeAttempts = ref(false)
 const chartLayout = ref({ trend: true, bar: true, percentile: true, table: true })
+
+const GROUP_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
+interface ObservationGroup {
+  id: string
+  name: string
+  color: string
+}
+const groups = ref<ObservationGroup[]>([])
+const jobGroupMap = ref<Record<string, string>>({})
+const groupMode = ref(false)
+const newGroupName = ref('')
+const renamingGroupId = ref<string | null>(null)
+const renameInput = ref('')
+
+const trendGroups = computed<TrendGroup[]>(() =>
+  groups.value.map((group) => ({
+    name: group.name,
+    color: group.color,
+    jobIds: selectedIds.value.filter((id) => jobGroupMap.value[id] === group.id),
+  })),
+)
+const groupedJobCount = computed(() => Object.values(jobGroupMap.value).filter((id) => groups.value.some((group) => group.id === id)).length)
+
+function addGroup() {
+  const name = newGroupName.value.trim()
+  if (!name) return
+  const id = `grp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const color = GROUP_COLORS[groups.value.length % GROUP_COLORS.length]
+  groups.value = [...groups.value, { id, name, color }]
+  newGroupName.value = ''
+}
+function startRenameGroup(id: string) {
+  const group = groups.value.find((item) => item.id === id)
+  if (!group) return
+  renamingGroupId.value = id
+  renameInput.value = group.name
+}
+function commitRenameGroup() {
+  const id = renamingGroupId.value
+  if (!id) return
+  const name = renameInput.value.trim()
+  groups.value = groups.value.map((group) => (group.id === id && name ? { ...group, name } : group))
+  renamingGroupId.value = null
+}
+function removeGroup(id: string) {
+  groups.value = groups.value.filter((group) => group.id !== id)
+  const next: Record<string, string> = {}
+  for (const [jobId, groupId] of Object.entries(jobGroupMap.value)) {
+    if (groupId !== id) next[jobId] = groupId
+  }
+  jobGroupMap.value = next
+}
+function setJobGroup(jobId: string, groupId: string) {
+  if (groupId) jobGroupMap.value = { ...jobGroupMap.value, [jobId]: groupId }
+  else {
+    const next = { ...jobGroupMap.value }
+    delete next[jobId]
+    jobGroupMap.value = next
+  }
+}
+function groupColorOf(jobId: string): string | undefined {
+  const groupId = jobGroupMap.value[jobId]
+  return groups.value.find((group) => group.id === groupId)?.color
+}
 
 const taskFilterId = computed(() => (route.query.task_id as string) || '')
 
@@ -266,11 +330,38 @@ onMounted(load)
       <ul class="drag-list">
         <li v-for="(row, index) in selectedRows" :key="row.id" class="drag-item" :class="{ dragging: dragIndex === index }" draggable="true" @dragstart="onDragStart(index)" @dragover.prevent @drop="onDrop(index)" @dragend="dragIndex = null">
           <span class="drag-handle"><IconGripVertical :size="16" /></span>
-          <span class="drag-index">{{ index + 1 }}</span>
+          <span class="drag-index" :style="groupColorOf(row.id) ? { background: groupColorOf(row.id), color: '#fff' } : {}">{{ index + 1 }}</span>
           <span class="drag-name">{{ row.job?.name || row.id }}</span>
           <span class="drag-target">{{ row.job ? targetName(row.job) : '' }}</span>
+          <select class="group-select compact-select" :value="jobGroupMap[row.id] || ''" @change="setJobGroup(row.id, ($event.target as HTMLSelectElement).value)">
+            <option value="">未分组</option>
+            <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option>
+          </select>
         </li>
       </ul>
+    </PageSection>
+
+    <PageSection v-if="selectedJobs.length" title="分组" description="新建分组并为选中结果指定分组；开启「分组对比」后趋势图按分组拆线展示。">
+      <template #actions>
+        <div class="inline-actions">
+          <span class="selection-count">已分组 {{ groupedJobCount }}/{{ selectedJobs.length }} 项</span>
+          <label class="new-group"><input v-model="newGroupName" type="text" placeholder="分组名称" @keydown.enter="addGroup" /><button class="button secondary" @click="addGroup"><IconPlus :size="16" />新建</button></label>
+        </div>
+      </template>
+      <div v-if="!groups.length" class="empty-state compact">还没有分组。输入名称新建一个，然后在上方排序列表中为每个结果选择分组。</div>
+      <div v-else class="group-cards">
+        <div v-for="group in groups" :key="group.id" class="group-card">
+          <span class="group-color" :style="{ background: group.color }" />
+          <template v-if="renamingGroupId === group.id">
+            <input v-model="renameInput" class="compact-select" type="text" @keydown.enter="commitRenameGroup" @blur="commitRenameGroup" />
+          </template>
+          <template v-else>
+            <span class="group-name" @click="startRenameGroup(group.id)">{{ group.name }}</span>
+          </template>
+          <span class="group-count">{{ trendGroups.find((item) => item.name === group.name)?.jobIds.length || 0 }} 项</span>
+          <button class="icon-button" :aria-label="`删除分组 ${group.name}`" @click="removeGroup(group.id)"><IconTrash :size="15" /></button>
+        </div>
+      </div>
     </PageSection>
 
     <div v-if="enrichedJobs.length" class="metrics-row">
@@ -302,14 +393,15 @@ onMounted(load)
           <label class="compact-check"><input v-model="chartLayout.bar" type="checkbox" /><IconChartBar :size="16" />柱状</label>
           <label class="compact-check"><input v-model="chartLayout.percentile" type="checkbox" /><IconChartDots :size="16" />分位</label>
           <label class="compact-check"><input v-model="chartLayout.table" type="checkbox" /><IconTable :size="16" />表格</label>
+          <label class="compact-check" :class="{ disabled: !groups.length }"><input v-model="groupMode" type="checkbox" :disabled="!groups.length" />分组对比</label>
         </div>
       </div>
     </PageSection>
 
     <div v-if="enrichedJobs.length" class="observation-chart-grid">
-      <ChartCard v-if="chartLayout.trend" title="趋势线图" description="按选定顺序展示各指标的选定统计量。">
+      <ChartCard v-if="chartLayout.trend" :title="groupMode && groups.length ? '趋势线图（分组对比）' : '趋势线图'" :description="groupMode && groups.length ? '按分组拆线：同组同色，不同指标用线型区分；x 轴为组内序号。' : '按选定顺序展示各指标的选定统计量。'">
         <template #actions><button class="button secondary compact-check" @click="downloadPng(trendRef?.getDataURL() || '', 'trend')"><IconDownload :size="16" />PNG</button></template>
-        <TrendLineChart ref="trendRef" :jobs="enrichedJobs" :metrics="chartMetrics" :statistic="statistic" :smooth="smooth" :show-label="showLabel" />
+        <TrendLineChart ref="trendRef" :jobs="enrichedJobs" :metrics="chartMetrics" :statistic="statistic" :smooth="smooth" :show-label="showLabel" :group-mode="groupMode" :groups="trendGroups" />
       </ChartCard>
       <ChartCard v-if="chartLayout.bar" title="对比柱状图" description="各 job 的指标数值柱形对比。">
         <template #actions><button class="button secondary compact-check" @click="downloadPng(barRef?.getDataURL() || '', 'bar')"><IconDownload :size="16" />PNG</button></template>

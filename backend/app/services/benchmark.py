@@ -390,7 +390,7 @@ class _ResourceSampler:
         }
 
 
-def _stream_measurement(settings: AppSettings, config: BenchmarkCreate) -> dict[str, Any]:
+def _stream_measurement(settings: AppSettings, config: BenchmarkCreate, cancel_check=None) -> dict[str, Any] | None:
     url = f"http://{settings.llama_host}:{settings.llama_port}{settings.request_path}"
     request_payload = _base_payload(config, stream=True)
     started = time.perf_counter()
@@ -403,27 +403,44 @@ def _stream_measurement(settings: AppSettings, config: BenchmarkCreate) -> dict[
         with httpx.Client(timeout=config.timeout_seconds) as client:
             with client.stream("POST", url, json=request_payload) as response:
                 response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    data = line[5:].strip() if line.startswith("data:") else line.strip()
-                    if data == "[DONE]":
-                        continue
-                    try:
-                        event = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    chunks.append(event)
-                    content = _content_from_event(event)
-                    if content:
-                        content_events.append(event)
-                        now = time.perf_counter()
-                        if first_content is None:
-                            first_content = now
-                        last_content = now
-                    event_timings = _find_timings(event)
-                    if event_timings:
-                        timings = event_timings
+
+                watcher = None
+                if cancel_check:
+                    def _watch():
+                        while not response.is_closed:
+                            if cancel_check():
+                                response.close()
+                                return
+                            time.sleep(0.3)
+                    watcher = threading.Thread(target=_watch, name="llamalens-cancel-watch", daemon=True)
+                    watcher.start()
+
+                try:
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
+                        data = line[5:].strip() if line.startswith("data:") else line.strip()
+                        if data == "[DONE]":
+                            continue
+                        try:
+                            event = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        chunks.append(event)
+                        content = _content_from_event(event)
+                        if content:
+                            content_events.append(event)
+                            now = time.perf_counter()
+                            if first_content is None:
+                                first_content = now
+                            last_content = now
+                        event_timings = _find_timings(event)
+                        if event_timings:
+                            timings = event_timings
+                except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ReadTimeout):
+                    if cancel_check and cancel_check():
+                        return None
+                    raise
     finished = time.perf_counter()
     predicted_n = _parse_number(timings, "predicted_n", "tokens_predicted")
     client_decode = None
@@ -455,8 +472,10 @@ def _non_stream_timings(settings: AppSettings, config: BenchmarkCreate) -> dict[
     }
 
 
-def _measure(settings: AppSettings, config: BenchmarkCreate) -> dict[str, Any]:
-    streamed = _stream_measurement(settings, config)
+def _measure(settings: AppSettings, config: BenchmarkCreate, cancel_check=None) -> dict[str, Any] | None:
+    streamed = _stream_measurement(settings, config, cancel_check)
+    if streamed is None:
+        return None
     measurement_mode = "stream"
     if streamed["timings"] is None:
         paired = _non_stream_timings(settings, config)
@@ -552,16 +571,30 @@ def _summarize(job_id: str) -> dict[str, Any]:
 
 def _run_wave(job_id: str, settings: AppSettings, config: BenchmarkCreate, warmup: bool, start_ordinal: int) -> int:
     workers = config.concurrency
+    cancel_event = threading.Event()
+
+    def cancel_check():
+        return cancel_event.is_set() or _is_cancelled(job_id)
+
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="llamalens-attempt") as pool:
-        futures = {pool.submit(_measure, settings, config): start_ordinal + index for index in range(workers)}
+        futures = {pool.submit(_measure, settings, config, cancel_check): start_ordinal + index for index in range(workers)}
+        cancelled = False
         for future in as_completed(futures):
             ordinal = futures[future]
             if _is_cancelled(job_id):
+                cancelled = True
+                cancel_event.set()
                 break
             try:
-                _persist_attempt(job_id, ordinal, warmup, future.result(), None)
+                result = future.result()
+                if result is not None:
+                    _persist_attempt(job_id, ordinal, warmup, result, None)
             except Exception as exc:
                 _persist_attempt(job_id, ordinal, warmup, None, exc)
+        if cancelled:
+            for future in futures:
+                future.cancel()
+            pool.shutdown(wait=False, cancel_futures=True)
     return start_ordinal + workers
 
 
