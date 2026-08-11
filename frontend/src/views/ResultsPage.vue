@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { IconChevronDown, IconDownload, IconEdit, IconRefresh, IconSearch, IconTrash, IconX } from '@tabler/icons-vue'
 import { api, jsonBody } from '../api'
+import ExcelJS from 'exceljs'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
@@ -182,21 +183,52 @@ function formalSuccessfulAttempts(job: BenchmarkJob) {
   return (job.attempts || []).filter((attempt) => !attempt.warmup && attempt.status === 'succeeded')
 }
 
-async function exportCsv() {
+async function exportExcel() {
   if (!selectedJobs.value.length) return
   if (selected.value) selectedAttemptIdsByJob.value[selected.value.id] = [...selectedAttemptIds.value]
   const detailedJobs = await Promise.all(selectedJobs.value.map(async (job) => {
     if (selected.value?.id === job.id) return selected.value
     return api<BenchmarkJob>(`/benchmarks/${job.id}`)
   }))
-  const header = [
-    'name', 'target', 'status', 'selected_count',
-    'ttft_avg', 'ttft_median', 'prefill_avg', 'prefill_median', 'decode_avg', 'decode_median',
-    'client_decode_avg', 'client_decode_median', 'total_avg', 'total_median',
-    'prompt_tokens_avg', 'predicted_tokens_avg', 'successes', 'failures', 'created_at',
-  ]
-  const quote = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`
-  const rows = detailedJobs.map((job) => {
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = 'LlamaLens'
+  workbook.created = new Date()
+  const sheet = workbook.addWorksheet('结果对比', { views: [{ state: 'frozen', ySplit: 1 }] })
+  const columns = [
+    { header: '测试名', key: 'name', width: 26 },
+    { header: '目标', key: 'target', width: 34 },
+    { header: '状态', key: 'status', width: 10 },
+    { header: '选中请求数', key: 'selected_count', width: 12 },
+    { header: 'TTFT 均值(ms)', key: 'ttft_avg', width: 14 },
+    { header: 'TTFT 中位数(ms)', key: 'ttft_median', width: 16 },
+    { header: 'Prefill 均值(tok/s)', key: 'prefill_avg', width: 18 },
+    { header: 'Prefill 中位数(tok/s)', key: 'prefill_median', width: 20 },
+    { header: 'Decode 均值(tok/s)', key: 'decode_avg', width: 18 },
+    { header: 'Decode 中位数(tok/s)', key: 'decode_median', width: 20 },
+    { header: 'Client Decode 均值(tok/s)', key: 'client_decode_avg', width: 22 },
+    { header: 'Client Decode 中位数(tok/s)', key: 'client_decode_median', width: 24 },
+    { header: 'Total 均值(ms)', key: 'total_avg', width: 14 },
+    { header: 'Total 中位数(ms)', key: 'total_median', width: 16 },
+    { header: 'Prompt tokens 均值', key: 'prompt_tokens_avg', width: 18 },
+    { header: 'Predicted tokens 均值', key: 'predicted_tokens_avg', width: 20 },
+    { header: '成功数', key: 'successes', width: 8 },
+    { header: '失败数', key: 'failures', width: 8 },
+    { header: '创建时间', key: 'created_at', width: 20 },
+  ] as unknown as ExcelJS.Column[]
+  sheet.columns = columns
+  const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDFF2ED' } } as ExcelJS.Fill
+  const headerFont = { bold: true, color: { argb: 'FF056653' } } as ExcelJS.Font
+  const headerAlign = { vertical: 'middle', horizontal: 'center', wrapText: true } as ExcelJS.Alignment
+  const headerRow = sheet.getRow(1)
+  columns.forEach((column, index) => {
+    const cell = headerRow.getCell(index + 1)
+    cell.fill = headerFill
+    cell.font = headerFont
+    cell.alignment = headerAlign
+    cell.border = { bottom: { style: 'thin', color: { argb: 'FFD6DDE0' } } }
+  })
+  headerRow.height = 20
+  detailedJobs.forEach((job) => {
     const allAttempts = formalSuccessfulAttempts(job)
     const selectedIdsForJob = selected.value?.id === job.id
       ? selectedAttemptIds.value
@@ -204,23 +236,40 @@ async function exportCsv() {
     const attempts = selectedIdsForJob
       ? allAttempts.filter((attempt) => selectedIdsForJob.includes(attempt.id))
       : allAttempts
-    return [
-      job.name, targetName(job), job.status, attempts.length,
-      averageFromAttempts(attempts, 'ttft_ms'), medianMetric(job, 'ttft_ms'),
-      averageFromAttempts(attempts, 'prefill_tps'), medianMetric(job, 'prefill_tps'),
-      averageFromAttempts(attempts, 'decode_tps'), medianMetric(job, 'decode_tps'),
-      averageFromAttempts(attempts, 'client_decode_tps'), medianMetric(job, 'client_decode_tps'),
-      averageFromAttempts(attempts, 'total_ms'), medianMetric(job, 'total_ms'),
-      averageFromAttempts(attempts, 'prompt_tokens'), averageFromAttempts(attempts, 'predicted_tokens'),
-      job.summary.successes, job.summary.failures, job.created_at,
-    ]
+    const values: Record<string, string | number> = {
+      name: job.name,
+      target: targetName(job),
+      status: job.status,
+      selected_count: attempts.length,
+      ttft_avg: averageFromAttempts(attempts, 'ttft_ms') ?? '',
+      ttft_median: medianMetric(job, 'ttft_ms') ?? '',
+      prefill_avg: averageFromAttempts(attempts, 'prefill_tps') ?? '',
+      prefill_median: medianMetric(job, 'prefill_tps') ?? '',
+      decode_avg: averageFromAttempts(attempts, 'decode_tps') ?? '',
+      decode_median: medianMetric(job, 'decode_tps') ?? '',
+      client_decode_avg: averageFromAttempts(attempts, 'client_decode_tps') ?? '',
+      client_decode_median: medianMetric(job, 'client_decode_tps') ?? '',
+      total_avg: averageFromAttempts(attempts, 'total_ms') ?? '',
+      total_median: medianMetric(job, 'total_ms') ?? '',
+      prompt_tokens_avg: averageFromAttempts(attempts, 'prompt_tokens') ?? '',
+      predicted_tokens_avg: averageFromAttempts(attempts, 'predicted_tokens') ?? '',
+      successes: job.summary.successes || 0,
+      failures: job.summary.failures || 0,
+      created_at: new Date(job.created_at).toLocaleString(),
+    }
+    const row = sheet.addRow(values)
+    for (let index = 4; index < columns.length; index++) {
+      const cell = row.getCell(index + 1)
+      if (typeof cell.value === 'number') cell.numFmt = '0.00'
+    }
   })
-  const csv = `\ufeff${[header, ...rows].map((row) => row.map(quote).join(',')).join('\n')}`
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  sheet.autoFilter = { from: 'A1', to: `${sheet.getColumn(columns.length).letter}${detailedJobs.length + 1}` }
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `llamalens-results-${new Date().toISOString().slice(0, 10)}.csv`
+  link.download = `llamalens-results-${new Date().toISOString().slice(0, 10)}.xlsx`
   link.click()
   URL.revokeObjectURL(url)
 }
@@ -278,7 +327,7 @@ function clearTaskFilter() {
           <span class="selection-count">已选 {{ selectedJobs.length }} 项</span>
           <button class="button secondary" @click="load"><IconRefresh :size="17" />刷新</button>
           <button class="button danger" :disabled="!selectedCanDelete" @click="deleteJobs(selectedIds)"><IconTrash :size="17" />删除选中</button>
-          <button class="button primary" :disabled="!selectedJobs.length" @click="exportCsv"><IconDownload :size="17" />导出选中测试 CSV</button>
+          <button class="button primary" :disabled="!selectedJobs.length" @click="exportExcel"><IconDownload :size="17" />导出选中测试 Excel</button>
         </div>
       </template>
       <div v-if="taskFilterId" class="filter-chip"><span>已按 Task 筛选: {{ taskFilterId.slice(0, 8) }}…</span><button class="icon-button" @click="clearTaskFilter"><IconX :size="15" /></button></div>
@@ -304,7 +353,7 @@ function clearTaskFilter() {
       </div>
     </PageSection>
 
-    <PageSection v-if="selected" title="测试详情" description="指标使用已选正式成功请求的算术平均值；中位数会保留并随 CSV 一起导出。">
+    <PageSection v-if="selected" title="测试详情" description="指标使用已选正式成功请求的算术平均值；中位数会保留并随 Excel 一起导出。">
       <template #actions>
         <button class="button secondary" @click="startRename"><IconEdit :size="17" />修改名称</button>
         <button v-if="terminalStatuses.has(selected.status)" class="button danger" @click="deleteJobs([selected.id])"><IconTrash :size="17" />删除此测试</button>
