@@ -79,6 +79,9 @@ def _migrate_legacy_columns() -> None:
             "draft_launch_config_json": "ALTER TABLE llama_services ADD COLUMN draft_launch_config_json TEXT DEFAULT ''",
             "applied_launch_config_json": "ALTER TABLE llama_services ADD COLUMN applied_launch_config_json TEXT DEFAULT ''",
             "applied_service_config_json": "ALTER TABLE llama_services ADD COLUMN applied_service_config_json TEXT DEFAULT ''",
+            "service_type": "ALTER TABLE llama_services ADD COLUMN service_type VARCHAR(32) DEFAULT 'exec'",
+            "restart_policy": "ALTER TABLE llama_services ADD COLUMN restart_policy VARCHAR(32) DEFAULT 'on-failure'",
+            "restart_sec": "ALTER TABLE llama_services ADD COLUMN restart_sec INTEGER DEFAULT 3",
         }
         missing_service_additions = [statement for name, statement in service_additions.items() if name not in service_columns]
         if missing_service_additions:

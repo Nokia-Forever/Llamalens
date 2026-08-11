@@ -58,6 +58,7 @@ def unit_path_for(unit_name: str) -> Path:
 def _extra_lines(section: str, text: str) -> list[str]:
     if "\x00" in text:
         raise ValueError(f"[{section}] 自定义内容不能包含 NUL")
+    managed_service_keys = {"ExecStart", "Type", "Restart", "RestartSec"}
     result: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -67,6 +68,10 @@ def _extra_lines(section: str, text: str) -> list[str]:
             raise ValueError(f"[{section}] 自定义内容不能创建新的 section")
         if re.match(r"(?i)^ExecStart\s*=", line):
             raise ValueError("ExecStart 由 LlamaLens 生成，不能在自定义内容中重复设置")
+        if section == "Service":
+            match = re.match(r"(?i)^([A-Za-z][A-Za-z0-9-]*)\s*=", line)
+            if match and match.group(1) in managed_service_keys:
+                raise ValueError(f"{match.group(1)} 由 LlamaLens 生成，不能在 [Service] 自定义内容中重复设置")
         if "=" not in line and not line.startswith(("#", ";")):
             raise ValueError(f"[{section}] 自定义行必须是 systemd 指令: {line}")
         result.append(line)
@@ -112,13 +117,13 @@ def render_unit(payload: LlamaServiceCreate, argv: list[str], unit_name: str | N
         *_extra_lines("Unit", payload.unit_extra_text),
         "",
         "[Service]",
-        "Type=exec",
+        f"Type={payload.service_type}",
         f"User={payload.service_user.strip() or 'root'}",
         f"Group={payload.service_group.strip() or payload.service_user.strip() or 'root'}",
         f"WorkingDirectory={payload.working_directory.strip() or '/'}",
         f"ExecStart={shlex.join(argv)}",
-        "Restart=on-failure",
-        "RestartSec=3",
+        f"Restart={payload.restart_policy}",
+        f"RestartSec={payload.restart_sec}",
         *_extra_lines("Service", payload.service_extra_text),
         "",
         "[Install]",
@@ -134,6 +139,7 @@ def payload_for_service(row: LlamaService) -> LlamaServiceCreate:
         name=row.name, description=row.description, unit_name=row.unit_name, server_bin=row.server_bin,
         service_user=row.service_user, service_group=row.service_group, working_directory=row.working_directory,
         host=row.host, port=row.port, health_path=row.health_path, request_path=row.request_path,
+        service_type=row.service_type, restart_policy=row.restart_policy, restart_sec=row.restart_sec,
         unit_extra_text=row.unit_extra_text, service_extra_text=row.service_extra_text,
         install_extra_text=row.install_extra_text,
     )
@@ -177,6 +183,9 @@ def _assign(row: LlamaService, payload: LlamaServiceCreate, unit_name: str) -> N
     row.port = payload.port
     row.health_path = payload.health_path
     row.request_path = payload.request_path
+    row.service_type = payload.service_type
+    row.restart_policy = payload.restart_policy
+    row.restart_sec = payload.restart_sec
     row.unit_extra_text = payload.unit_extra_text
     row.service_extra_text = payload.service_extra_text
     row.install_extra_text = payload.install_extra_text
@@ -192,6 +201,7 @@ def serialize_service(row: LlamaService, status: bool = False) -> dict[str, obje
         "unit_path": row.unit_path, "server_bin": row.server_bin, "service_user": row.service_user,
         "service_group": row.service_group, "working_directory": row.working_directory, "host": row.host,
         "port": row.port, "health_path": row.health_path, "request_path": row.request_path,
+        "service_type": row.service_type, "restart_policy": row.restart_policy, "restart_sec": row.restart_sec,
         "unit_extra_text": row.unit_extra_text, "service_extra_text": row.service_extra_text,
         "install_extra_text": row.install_extra_text, "rendered_unit": row.rendered_unit,
         "source_profile_id": row.source_profile_id,

@@ -239,6 +239,13 @@ class LlamaServiceCreate(BaseModel):
     port: int = 8080
     health_path: str = "/health"
     request_path: str = "/completion"
+    service_type: Literal[
+        "simple", "exec", "forking", "oneshot", "dbus", "notify", "notify-reload", "idle"
+    ] = "exec"
+    restart_policy: Literal[
+        "no", "on-success", "on-failure", "on-abnormal", "on-watchdog", "on-abort", "always"
+    ] = "on-failure"
+    restart_sec: int = Field(default=3, ge=0)
     unit_extra_text: str = ""
     service_extra_text: str = ""
     install_extra_text: str = ""

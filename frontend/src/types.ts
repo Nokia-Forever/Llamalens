@@ -208,6 +208,9 @@ export interface LlamaService {
   port: number
   health_path: string
   request_path: string
+  service_type: string
+  restart_policy: string
+  restart_sec: number
   unit_extra_text: string
   service_extra_text: string
   install_extra_text: string

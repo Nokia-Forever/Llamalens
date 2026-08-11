@@ -27,8 +27,9 @@ const editingDraft = ref(false)
 const emptyForm = () => ({
   name: '', description: '', unit_name: '', server_bin: '/usr/local/bin/llama-server',
   service_user: 'root', service_group: 'root', working_directory: '/', host: '127.0.0.1', port: 8080,
-  health_path: '/health', request_path: '/completion', unit_extra_text: '', service_extra_text: '',
-  install_extra_text: '',
+  health_path: '/health', request_path: '/completion',
+  service_type: 'exec', restart_policy: 'on-failure', restart_sec: 3,
+  unit_extra_text: '', service_extra_text: '', install_extra_text: '',
 })
 const form = reactive(emptyForm())
 
@@ -57,6 +58,7 @@ function applyService(service: LlamaService, replaceDraft = true) {
     server_bin: service.server_bin, service_user: service.service_user, service_group: service.service_group,
     working_directory: service.working_directory, host: service.host, port: service.port,
     health_path: service.health_path, request_path: service.request_path,
+    service_type: service.service_type, restart_policy: service.restart_policy, restart_sec: service.restart_sec,
     unit_extra_text: service.unit_extra_text, service_extra_text: service.service_extra_text,
     install_extra_text: service.install_extra_text,
   })
@@ -288,6 +290,37 @@ onMounted(load)
           <label class="field"><span>Port</span><input v-model.number="form.port" type="number" min="1" max="65535" required /></label>
           <label class="field"><span>健康检查路径</span><input v-model.trim="form.health_path" required /></label>
           <label class="field"><span>Benchmark 请求路径</span><input v-model.trim="form.request_path" required /></label>
+        </div>
+      </PageSection>
+
+      <PageSection title="Service 进程与重启策略" description="这些指令写入 [Service] 段；Type=exec 适合前台运行的 llama-server，Restart=on-failure 可在异常退出时自动拉起。">
+        <div class="form-grid two-columns">
+          <label class="field">
+            <span>Type</span>
+            <select v-model="form.service_type">
+              <option value="simple">simple</option>
+              <option value="exec">exec</option>
+              <option value="forking">forking</option>
+              <option value="oneshot">oneshot</option>
+              <option value="dbus">dbus</option>
+              <option value="notify">notify</option>
+              <option value="notify-reload">notify-reload</option>
+              <option value="idle">idle</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Restart</span>
+            <select v-model="form.restart_policy">
+              <option value="no">no</option>
+              <option value="on-success">on-success</option>
+              <option value="on-failure">on-failure</option>
+              <option value="on-abnormal">on-abnormal</option>
+              <option value="on-watchdog">on-watchdog</option>
+              <option value="on-abort">on-abort</option>
+              <option value="always">always</option>
+            </select>
+          </label>
+          <label class="field"><span>RestartSec（秒）</span><input v-model.number="form.restart_sec" type="number" min="0" step="1" required /></label>
         </div>
       </PageSection>
 
