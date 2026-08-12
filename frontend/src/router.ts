@@ -1,8 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getAuthToken } from './api'
+import { useAppStore } from './stores/app'
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', component: () => import('./views/LoginPage.vue'), meta: { title: '登录' } },
     { path: '/', component: () => import('./views/DashboardPage.vue'), meta: { title: '概览' } },
     { path: '/services', component: () => import('./views/ServicesPage.vue'), meta: { title: 'Llama Services' } },
     { path: '/models', component: () => import('./views/ModelsPage.vue'), meta: { title: '模型库' } },
@@ -13,4 +16,14 @@ export const router = createRouter({
     { path: '/observation', component: () => import('./views/ObservationPage.vue'), meta: { title: '观测' } },
     { path: '/settings', component: () => import('./views/SettingsPage.vue'), meta: { title: '设置' } },
   ],
+})
+
+router.beforeEach((to) => {
+  if (to.path === '/login') return true
+  const store = useAppStore()
+  if (!store.authRequired) return true
+  if (!getAuthToken()) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  return true
 })

@@ -5,7 +5,23 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 
+from app.logging_config import get_logger
 from app.schemas import AppSettings
+
+
+logger = get_logger(__name__)
+
+
+def _log_result(event: str, result: "CommandResult") -> None:
+    logger.info(
+        event,
+        extra={
+            "argv": result.argv,
+            "returncode": result.returncode,
+            "ok": result.ok,
+            "stderr": (result.stderr or "")[:300],
+        },
+    )
 
 
 @dataclass
@@ -38,9 +54,11 @@ def run_service_action(settings: AppSettings, action: str, timeout: int = 30) ->
     argv = [*_prefix(settings), action, settings.llama_service_name]
     try:
         completed = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
-        return CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+        result = CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+        result = CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+    _log_result("systemctl.service_action", result)
+    return result
 
 
 def run_unit_action(unit_name: str, action: str, timeout: int = 30) -> CommandResult:
@@ -52,18 +70,22 @@ def run_unit_action(unit_name: str, action: str, timeout: int = 30) -> CommandRe
         argv = ["systemctl", action, unit_name]
     try:
         completed = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
-        return CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+        result = CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+        result = CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+    _log_result("systemctl.unit_action", result)
+    return result
 
 
 def daemon_reload(timeout: int = 30) -> CommandResult:
     argv = ["systemctl", "daemon-reload"]
     try:
         completed = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
-        return CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+        result = CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+        result = CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+    _log_result("systemctl.daemon_reload", result)
+    return result
 
 
 def read_unit_journal(unit_name: str, lines: int = 200) -> CommandResult:
@@ -71,9 +93,11 @@ def read_unit_journal(unit_name: str, lines: int = 200) -> CommandResult:
     argv = ["journalctl", "-u", unit_name, "-n", str(lines), "--no-pager"]
     try:
         completed = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
-        return CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+        result = CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+        result = CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+    _log_result("systemctl.journal", result)
+    return result
 
 
 def read_journal(settings: AppSettings, lines: int = 200) -> CommandResult:
@@ -84,9 +108,11 @@ def read_journal(settings: AppSettings, lines: int = 200) -> CommandResult:
     argv.extend(["-u", settings.llama_service_name, "-n", str(lines), "--no-pager"])
     try:
         completed = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
-        return CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+        result = CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+        result = CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+    _log_result("systemctl.journal", result)
+    return result
 
 
 def probe_binary(settings: AppSettings) -> dict[str, object]:

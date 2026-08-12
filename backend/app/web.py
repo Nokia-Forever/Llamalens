@@ -3,6 +3,7 @@ from __future__ import annotations
 import uvicorn
 
 from app.database import SessionLocal, init_db
+from app.logging_config import LOGGING_CONFIG
 from app.services.settings_service import get_settings
 
 
@@ -15,7 +16,7 @@ def main() -> None:
         port = settings.web_port
     finally:
         db.close()
-    uvicorn.run("app.main:app", host=host, port=port, proxy_headers=True)
+    uvicorn.run("app.main:app", host=host, port=port, proxy_headers=True, log_config=LOGGING_CONFIG)
 
 
 if __name__ == "__main__":

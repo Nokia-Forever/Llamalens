@@ -1,6 +1,7 @@
 pyproject.toml
 app/__init__.py
 app/database.py
+app/logging_config.py
 app/main.py
 app/models.py
 app/runner.py
@@ -8,6 +9,7 @@ app/schemas.py
 app/web.py
 app/api/__init__.py
 app/api/arguments.py
+app/api/auth.py
 app/api/benchmarks.py
 app/api/models.py
 app/api/profiles.py
@@ -18,6 +20,7 @@ app/api/system.py
 app/api/tasks.py
 app/services/__init__.py
 app/services/arguments.py
+app/services/auth_service.py
 app/services/benchmark.py
 app/services/job_control.py
 app/services/llama_services.py
@@ -33,6 +36,7 @@ llamalens.egg-info/dependency_links.txt
 llamalens.egg-info/requires.txt
 llamalens.egg-info/top_level.txt
 tests/test_arguments.py
+tests/test_auth_health_logging.py
 tests/test_benchmark.py
 tests/test_profiles.py
 tests/test_services.py

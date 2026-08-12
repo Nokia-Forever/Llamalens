@@ -409,3 +409,16 @@ code, pre, .metric-block strong, .data-table td:not(:first-child) { font-family:
   .drag-item { grid-template-columns: 20px 28px 1fr; }
   .group-select { grid-column: 1 / -1; }
 }
+
+.login-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.login-page { width: 100%; max-width: 380px; }
+.login-card { display: grid; gap: 16px; padding: 34px 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 50px color-mix(in srgb, var(--text) 14%, transparent); }
+.login-mark { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 750; letter-spacing: -.04em; font-size: 20px; }
+.login-card h2 { margin: 0; font-size: 22px; }
+.login-hint { margin: -6px 0 0; color: var(--muted); font-size: 13px; }
+.login-card .field { gap: 7px; }
+.login-card .button.primary { justify-content: center; }
+.input-row { display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.input-row svg { color: var(--muted); flex-shrink: 0; }
+.input-row input { flex: 1; min-width: 0; min-height: 38px; border: 0; outline: none; background: transparent; color: var(--text); }
+.input-row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }

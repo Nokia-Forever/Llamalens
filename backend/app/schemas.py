@@ -264,3 +264,11 @@ class LlamaServiceUpdate(LlamaServiceCreate):
 
 class SelectProfileInput(BaseModel):
     profile_id: str
+
+
+class LoginInput(BaseModel):
+    token: str = Field(min_length=1)
+
+
+class RotateTokenInput(BaseModel):
+    new_token: str = Field(min_length=16)

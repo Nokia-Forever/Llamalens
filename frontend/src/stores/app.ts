@@ -4,6 +4,7 @@ export const useAppStore = defineStore('app', {
   state: () => ({
     theme: (localStorage.getItem('llamalens-theme') || 'system') as 'light' | 'dark' | 'system',
     notices: [] as Array<{ id: number; type: 'success' | 'error' | 'info'; message: string }>,
+    authRequired: false,
   }),
   actions: {
     applyTheme() {
@@ -19,6 +20,9 @@ export const useAppStore = defineStore('app', {
       const id = Date.now() + Math.random()
       this.notices.push({ id, type, message })
       window.setTimeout(() => (this.notices = this.notices.filter((item) => item.id !== id)), 4200)
+    },
+    setAuthRequired(value: boolean) {
+      this.authRequired = value
     },
   },
 })

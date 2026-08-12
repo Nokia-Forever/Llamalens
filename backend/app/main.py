@@ -4,32 +4,46 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from app.api import arguments, benchmarks, models, profiles, queue, services, settings, system, tasks
-from app.database import SessionLocal, init_db
+from app.api import arguments, auth, benchmarks, models, profiles, queue, services, settings, system, tasks
+from app.database import SessionLocal, get_db, init_db
+from app.logging_config import get_logger, setup_logging
 from app.services.arguments import seed_builtin_catalog
+from app.services.auth_service import bootstrap_from_env
 from app.services.llama_services import migrate_legacy_service
 from app.services.settings_service import get_settings
 from app.services import task_queue
 
 
+logger = get_logger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    setup_logging()
+    logger.info("lifespan.starting")
     init_db()
     db = SessionLocal()
     try:
         seed_builtin_catalog(db)
         migrate_legacy_service(db, get_settings(db))
+        if bootstrap_from_env(db):
+            logger.info("auth.token_bootstrapped")
     finally:
         db.close()
     task_queue.recover_on_startup()
     task_queue.get_scheduler().start()
+    logger.info("lifespan.started")
     yield
+    logger.info("lifespan.stopping")
     task_queue.get_scheduler().stop()
+    logger.info("lifespan.stopped")
 
 
 app = FastAPI(title="LlamaLens API", version="0.1.0", lifespan=lifespan)
@@ -50,13 +64,42 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(Exception)
+async def uncaught_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("uncaught_exception", extra={"path": request.url.path})
+    return JSONResponse(status_code=500, content={"detail": "internal server error"})
+
+
+def _db_ping(db: Session) -> str:
+    try:
+        db.execute(text("SELECT 1"))
+        return "ok"
+    except Exception:
+        logger.exception("health.db_ping_failed")
+        return "fail"
+
+
 @app.get("/api/v1/health")
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)) -> dict[str, str]:
+    return {"status": "ok", "db": _db_ping(db)}
 
 
-for router in [settings.router, system.router, services.router, arguments.router, models.router, profiles.router, benchmarks.router, tasks.router, queue.router]:
-    app.include_router(router, prefix="/api/v1")
+@app.get("/api/v1/ready")
+def ready(db: Session = Depends(get_db)) -> dict[str, object]:
+    db_status = _db_ping(db)
+    scheduler_alive = task_queue.get_scheduler().is_alive()
+    status = "ready" if db_status == "ok" and scheduler_alive else "degraded"
+    return {"status": status, "checks": {"db": db_status, "scheduler_alive": scheduler_alive}}
+
+
+app.include_router(auth.router, prefix="/api/v1")
+
+API_ROUTERS = [
+    settings.router, system.router, services.router, arguments.router, models.router,
+    profiles.router, benchmarks.router, tasks.router, queue.router,
+]
+for router in API_ROUTERS:
+    app.include_router(router, prefix="/api/v1", dependencies=[Depends(auth.verify_auth)])
 
 
 frontend_dist = Path(os.getenv("LLAMALENS_FRONTEND_DIST", Path(__file__).resolve().parents[2] / "frontend" / "dist"))

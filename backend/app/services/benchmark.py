@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
+from app.logging_config import get_logger
 from app.models import BenchmarkAttempt, BenchmarkJob, BenchmarkTask, LlamaService, Profile, ProfileVersion
 from app.schemas import AppSettings, BenchmarkCreate, LaunchConfig, LlamaServiceCreate
 from app.services.job_control import EXECUTION_LOCK
@@ -23,6 +24,8 @@ from app.services.settings_service import get_settings
 from app.services.llama_services import launch_aliases, render_unit
 from app.services.profiles_service import build_launch_argv
 
+
+logger = get_logger(__name__)
 
 BENCHMARK_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llamalens-benchmark")
 _cancelled_jobs: set[str] = set()
@@ -107,6 +110,9 @@ def create_benchmark_job(db: Session, payload: BenchmarkCreate) -> BenchmarkJob:
     db.commit()
     db.refresh(job)
     BENCHMARK_EXECUTOR.submit(_run_job, job.id)
+    logger.info("benchmark.created", extra={
+        "job_id": job.id, "service_id": job.service_id, "model_alias": job.model_alias,
+    })
     return job
 
 
@@ -134,6 +140,9 @@ def create_run_for_task(db: Session, task: BenchmarkTask, session_id: str | None
     db.add(job)
     db.commit()
     db.refresh(job)
+    logger.info("benchmark.created", extra={
+        "job_id": job.id, "service_id": job.service_id, "model_alias": job.model_alias, "task_id": task.id,
+    })
     return job
 
 
@@ -198,6 +207,7 @@ def benchmark_service_unit(db: Session, job: BenchmarkJob) -> dict[str, str]:
 def cancel_benchmark(job_id: str) -> None:
     with _cancel_lock:
         _cancelled_jobs.add(job_id)
+    logger.info("benchmark.cancel_requested", extra={"job_id": job_id})
 
 
 def _is_cancelled(job_id: str) -> bool:
@@ -632,6 +642,7 @@ def _run_job_locked(job_id: str) -> None:
         job.status = "running"
         job.started_at = datetime.now(timezone.utc)
         db.commit()
+        logger.info("benchmark.started", extra={"job_id": job_id})
     finally:
         db.close()
 
@@ -660,9 +671,11 @@ def _run_job_locked(job_id: str) -> None:
                 job.summary_json = json.dumps(summary, ensure_ascii=False)
                 job.finished_at = datetime.now(timezone.utc)
                 db.commit()
+                logger.info("benchmark.finished", extra={"job_id": job_id, "status": job.status})
         finally:
             db.close()
     except Exception as exc:
+        logger.warning("benchmark.failed", extra={"job_id": job_id, "error": str(exc)})
         db = SessionLocal()
         try:
             job = db.get(BenchmarkJob, job_id)

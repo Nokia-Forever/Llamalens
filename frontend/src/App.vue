@@ -18,6 +18,7 @@ import { useAppStore } from './stores/app'
 const route = useRoute()
 const store = useAppStore()
 const title = computed(() => String(route.meta.title || 'LlamaLens'))
+const isLoginPage = computed(() => route.path === '/login')
 const nav = [
   { to: '/', label: '概览', icon: IconGauge },
   { to: '/services', label: 'Services', icon: IconServer },
@@ -34,7 +35,13 @@ onMounted(() => store.applyTheme())
 </script>
 
 <template>
-  <div class="app-shell">
+  <div v-if="isLoginPage" class="login-shell">
+    <RouterView />
+    <div class="notice-stack" aria-live="polite">
+      <div v-for="notice in store.notices" :key="notice.id" class="notice" :class="`notice-${notice.type}`">{{ notice.message }}</div>
+    </div>
+  </div>
+  <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">LL</div>

@@ -10,8 +10,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
+from app.logging_config import get_logger
 from app.models import BenchmarkJob, BenchmarkTask, TaskQueue, TaskQueueItem, TaskQueueHistory
 from app.services.benchmark import cancel_benchmark, create_run_for_task, is_benchmark_active, run_benchmark_job
+
+
+logger = get_logger(__name__)
 
 
 def _aware_utc(dt: datetime | None) -> datetime | None:
@@ -294,12 +298,18 @@ class QueueScheduler:
         self._running = False
 
     def start(self) -> None:
+        if self._thread.is_alive():
+            return
         self._running = True
+        self._thread = threading.Thread(target=self._loop, name="llamalens-queue-scheduler", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         self._running = False
         self.notify()
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
 
     def notify(self) -> None:
         with self._condition:
@@ -401,6 +411,9 @@ class QueueScheduler:
         q.current_item_id = item.id
         db.commit()
         _record_history(db, item.id, item.task_id, "started", job.id, {})
+        logger.info("queue.item_started", extra={
+            "item_id": item.id, "task_id": item.task_id, "run_id": job.id,
+        })
 
     def _handle_run_finished(self, db: Session, q: TaskQueue) -> None:
         item_id = q.current_item_id
@@ -421,6 +434,10 @@ class QueueScheduler:
         _record_history(db, item.id, item.task_id, action, item.last_run_id,
                         {"status": run_status, "error": job.error if job else None})
         _update_task_stats(db, item.task_id, run_status)
+        logger.info("queue.item_finished", extra={
+            "item_id": item.id, "task_id": item.task_id, "run_id": item.last_run_id,
+            "status": run_status,
+        })
 
         db.delete(item)
         q.current_item_id = None

@@ -21,6 +21,14 @@ class SettingsRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class AuthSecret(Base):
+    __tablename__ = "auth_secrets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    token_hash: Mapped[str] = mapped_column(String(128), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class ArgumentCatalog(Base):
     __tablename__ = "argument_catalog"
 

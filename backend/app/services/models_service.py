@@ -14,13 +14,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
+from app.logging_config import get_logger
 from app.models import DownloadJob, ModelFile
 from app.schemas import AppSettings, DownloadCreate
 
 
+logger = get_logger(__name__)
+
 EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="llamalens-download")
 _cancelled_downloads: set[str] = set()
 _cancel_lock = threading.Lock()
+
+
+def _url_host(url: str) -> str:
+    try:
+        return urlparse(url).netloc or ""
+    except Exception:
+        return ""
 
 
 QUANT_RE = re.compile(
@@ -139,6 +149,9 @@ def _run_download(job_id: str, timeout_seconds: int) -> None:
             return
         job.status = "running"
         db.commit()
+        logger.info("download.start", extra={
+            "job_id": job_id, "url_host": _url_host(job.url), "total_bytes": job.total_bytes,
+        })
         target = Path(job.target_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         part = target.with_suffix(target.suffix + ".part")
@@ -164,12 +177,15 @@ def _run_download(job_id: str, timeout_seconds: int) -> None:
                     db.commit()
             if cancelled:
                 part.unlink(missing_ok=True)
+                logger.info("download.cancelled", extra={"job_id": job_id, "downloaded_bytes": written})
                 return
         part.replace(target)
         job.status = "succeeded"
         job.finished_at = datetime.now(timezone.utc)
         db.commit()
+        logger.info("download.finished", extra={"job_id": job_id, "downloaded_bytes": job.downloaded_bytes})
     except Exception as exc:  # background job must persist diagnostics
+        logger.warning("download.failed", extra={"job_id": job_id, "error": str(exc)})
         job = db.get(DownloadJob, job_id)
         if job is not None:
             job.status = "failed"
