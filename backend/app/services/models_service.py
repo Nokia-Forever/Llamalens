@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -24,6 +26,20 @@ logger = get_logger(__name__)
 EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="llamalens-download")
 _cancelled_downloads: set[str] = set()
 _cancel_lock = threading.Lock()
+
+
+def _download_commit_interval_s() -> float:
+    try:
+        return max(0.5, int(os.getenv("LLAMALENS_DOWNLOAD_COMMIT_INTERVAL_MS", "2000")) / 1000.0)
+    except ValueError:
+        return 2.0
+
+
+def _download_commit_interval_bytes() -> int:
+    try:
+        return max(1, int(os.getenv("LLAMALENS_DOWNLOAD_COMMIT_INTERVAL_BYTES", str(16 * 1024 * 1024))))
+    except ValueError:
+        return 16 * 1024 * 1024
 
 
 def _url_host(url: str) -> str:
@@ -162,6 +178,10 @@ def _run_download(job_id: str, timeout_seconds: int) -> None:
             db.commit()
             written = 0
             cancelled = False
+            last_commit_at = time.monotonic()
+            last_commit_bytes = 0
+            commit_interval_s = _download_commit_interval_s()
+            commit_interval_bytes = _download_commit_interval_bytes()
             with part.open("wb") as handle:
                 for chunk in response.iter_bytes(1024 * 1024):
                     with _cancel_lock:
@@ -174,7 +194,11 @@ def _run_download(job_id: str, timeout_seconds: int) -> None:
                     handle.write(chunk)
                     written += len(chunk)
                     job.downloaded_bytes = written
-                    db.commit()
+                    now = time.monotonic()
+                    if (now - last_commit_at >= commit_interval_s) or (written - last_commit_bytes >= commit_interval_bytes):
+                        db.commit()
+                        last_commit_at = now
+                        last_commit_bytes = written
             if cancelled:
                 part.unlink(missing_ok=True)
                 logger.info("download.cancelled", extra={"job_id": job_id, "downloaded_bytes": written})

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -26,13 +26,21 @@ def _model_dict(row: ModelFile):
 
 
 @router.get("")
-def list_models(q: str = "", available_only: bool = True, db: Session = Depends(get_db)):
+def list_models(
+    q: str = "",
+    available_only: bool = True,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
     statement = select(ModelFile)
     if q:
         statement = statement.where((ModelFile.name.ilike(f"%{q}%")) | (ModelFile.path.ilike(f"%{q}%")))
     if available_only:
         statement = statement.where(ModelFile.available.is_(True))
-    return [_model_dict(row) for row in db.scalars(statement.order_by(ModelFile.name)).all()]
+    total = db.scalar(select(func.count()).select_from(statement.subquery()))
+    rows = db.scalars(statement.order_by(ModelFile.name).offset(offset).limit(limit)).all()
+    return {"items": [_model_dict(row) for row in rows], "total": total, "offset": offset, "limit": limit}
 
 
 @router.post("/scan")
@@ -59,22 +67,33 @@ def start_download(payload: DownloadCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/downloads")
-def list_downloads(db: Session = Depends(get_db)):
-    rows = db.scalars(select(DownloadJob).order_by(DownloadJob.created_at.desc()).limit(100)).all()
-    return [
-        {
-            "id": row.id,
-            "url": row.url,
-            "target_path": row.target_path,
-            "status": row.status,
-            "downloaded_bytes": row.downloaded_bytes,
-            "total_bytes": row.total_bytes,
-            "error": row.error,
-            "created_at": row.created_at,
-            "finished_at": row.finished_at,
-        }
-        for row in rows
-    ]
+def list_downloads(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    base = select(DownloadJob).order_by(DownloadJob.created_at.desc())
+    total = db.scalar(select(func.count()).select_from(base.subquery()))
+    rows = db.scalars(base.offset(offset).limit(limit)).all()
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "url": row.url,
+                "target_path": row.target_path,
+                "status": row.status,
+                "downloaded_bytes": row.downloaded_bytes,
+                "total_bytes": row.total_bytes,
+                "error": row.error,
+                "created_at": row.created_at,
+                "finished_at": row.finished_at,
+            }
+            for row in rows
+        ],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
 
 
 @router.post("/downloads/{job_id}/cancel")

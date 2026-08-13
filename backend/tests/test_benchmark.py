@@ -278,3 +278,52 @@ def test_bulk_delete_is_atomic_and_rejects_running_jobs(client):
     deleted = client.post("/api/v1/benchmarks/bulk-delete", json={"ids": ["finished", "active"]})
     assert deleted.status_code == 200
     assert set(deleted.json()["deleted_ids"]) == {"finished", "active"}
+
+
+def test_list_jobs_returns_paginated_envelope(client):
+    db = SessionLocal()
+    try:
+        db.add(_stored_job("envelope-1"))
+        db.add(_stored_job("envelope-2"))
+        db.commit()
+    finally:
+        db.close()
+    body = client.get("/api/v1/benchmarks").json()
+    assert set(body.keys()) == {"items", "total", "offset", "limit"}
+    assert body["total"] == 2
+    assert body["offset"] == 0
+    assert body["limit"] == 50
+    assert {item["id"] for item in body["items"]} == {"envelope-1", "envelope-2"}
+
+
+def test_list_jobs_lightweight_uses_summary_metrics(client):
+    db = SessionLocal()
+    try:
+        job = _stored_job("lightweight-1")
+        job.summary_json = json.dumps({"metrics": {"ttft_ms": {"average": 123.4}}})
+        attempt = BenchmarkAttempt(
+            job=job, ordinal=1, warmup=False, status="succeeded", measurement_mode="stream",
+            ttft_ms=999.0, request_json="{}", raw_response_json="{}", resource_json="{}",
+        )
+        db.add_all([job, attempt])
+        db.commit()
+    finally:
+        db.close()
+    body = client.get("/api/v1/benchmarks").json()
+    job_item = next(item for item in body["items"] if item["id"] == "lightweight-1")
+    assert job_item["summary"]["metrics"]["ttft_ms"]["average"] == 123.4
+
+
+def test_list_jobs_pagination_respects_offset_limit(client):
+    db = SessionLocal()
+    try:
+        for i in range(5):
+            db.add(_stored_job(f"page-{i}"))
+        db.commit()
+    finally:
+        db.close()
+    body = client.get("/api/v1/benchmarks?offset=1&limit=2").json()
+    assert body["total"] == 5
+    assert body["offset"] == 1
+    assert body["limit"] == 2
+    assert len(body["items"]) == 2

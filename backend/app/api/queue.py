@@ -26,7 +26,17 @@ def patch_queue(payload: QueuePatch, db: Session = Depends(get_db)):
             return task_queue.start_queue(db)
         elif payload.status == "pause":
             return task_queue.pause_queue(db)
+        elif payload.status == "stop":
+            return task_queue.stop_queue(db)
         return task_queue.get_queue_state(db)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/reset")
+def reset_queue(db: Session = Depends(get_db)):
+    try:
+        return task_queue.reset_queue(db)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

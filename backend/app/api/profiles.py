@@ -1,21 +1,29 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import BenchmarkJob, Profile, SwitchJob
 from app.schemas import ProfileCreate, ProfileOut, ProfileUpdate
-from app.services.profiles_service import create_profile, serialize_profile, update_profile
+from app.services.profiles_service import canonical_flags, create_profile, known_flags, serialize_profile, update_profile
 from app.services.settings_service import get_settings
 
 
 router = APIRouter(prefix="/profiles", tags=["profiles"])
 
 
-@router.get("", response_model=list[ProfileOut])
-def list_profiles(db: Session = Depends(get_db)):
+@router.get("")
+def list_profiles(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
     settings = get_settings(db)
-    return [serialize_profile(db, settings, row) for row in db.scalars(select(Profile).order_by(Profile.updated_at.desc())).all()]
+    flags = (known_flags(db), canonical_flags(db))
+    statement = select(Profile).order_by(Profile.updated_at.desc())
+    total = db.scalar(select(func.count()).select_from(statement.subquery()))
+    rows = db.scalars(statement.offset(offset).limit(limit)).all()
+    return {"items": [serialize_profile(db, settings, row, flags=flags) for row in rows], "total": total, "offset": offset, "limit": limit}
 
 
 @router.post("", response_model=ProfileOut)

@@ -4,14 +4,18 @@ import {
   IconArchive, IconCopy, IconDeviceFloppy, IconDownload, IconEdit, IconPlayerPause, IconPlayerPlay,
   IconPlus, IconRefresh, IconRestore, IconRocket, IconTemplate, IconTrash,
 } from '@tabler/icons-vue'
-import { api, jsonBody } from '../api'
+import { useI18n } from 'vue-i18n'
+import { servicesApi, profilesApi, modelsApi, argumentsApi } from '../api'
 import LaunchConfigEditor from '../components/LaunchConfigEditor.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { useAppStore } from '../stores/app'
+import { useBusy } from '../composables/useBusy'
+import { cloneConfig } from '../utils'
 import type { CatalogArgument, LaunchConfig, LlamaService, ModelFile, Profile } from '../types'
 
 const store = useAppStore()
+const { t } = useI18n()
 const services = ref<LlamaService[]>([])
 const profiles = ref<Profile[]>([])
 const models = ref<ModelFile[]>([])
@@ -20,7 +24,7 @@ const selectedId = ref<string | null>(null)
 const profileId = ref('')
 const draft = ref<LaunchConfig | null>(null)
 const preview = ref('')
-const busy = ref(false)
+const { run: runBusy, isBusy } = useBusy()
 const logs = ref('')
 const editingDraft = ref(false)
 
@@ -42,10 +46,6 @@ const localPending = computed(() => {
   if (!draft.value) return false
   return JSON.stringify(draft.value) !== JSON.stringify(selected.value?.applied_launch_config || null)
 })
-
-function cloneConfig(config: LaunchConfig | null): LaunchConfig | null {
-  return config ? JSON.parse(JSON.stringify(config)) as LaunchConfig : null
-}
 
 function basePayload() {
   return { ...form }
@@ -69,15 +69,20 @@ function applyService(service: LlamaService, replaceDraft = true) {
 }
 
 async function fetchServices(selectId?: string, replaceDraft = true) {
-  services.value = await api<LlamaService[]>('/services?include_archived=true&with_status=true')
+  services.value = await servicesApi.list({ include_archived: true, with_status: true })
   const target = services.value.find((item) => item.id === (selectId || selectedId.value))
   if (target) applyService(target, replaceDraft)
 }
 
 async function load() {
-  ;[profiles.value, models.value, catalog.value] = await Promise.all([
-    api<Profile[]>('/profiles'), api<ModelFile[]>('/models'), api<CatalogArgument[]>('/arguments?limit=1000'),
+  const [profilesPage, modelsPage, catalogData] = await Promise.all([
+    profilesApi.list({ limit: 200 }),
+    modelsApi.list({ limit: 200 }),
+    argumentsApi.list({ limit: 1000 }),
   ])
+  profiles.value = profilesPage.items
+  models.value = modelsPage.items
+  catalog.value = catalogData
   await fetchServices()
   if (!selectedId.value && services.value.length) applyService(services.value[0])
   if (!profileId.value) profileId.value = profiles.value[0]?.id || ''
@@ -94,152 +99,161 @@ function reset() {
 }
 
 function profileSummary(profile: Profile | null) {
-  if (!profile) return '未选择 Profile'
-  if (profile.mode === 'single') return `单模型 · ${profile.model_alias}`
+  if (!profile) return t('services.noProfileSelected')
+  if (profile.mode === 'single') return t('services.singleSummary', { alias: profile.model_alias })
   const aliases = profile.models.filter((item) => item.enabled).map((item) => item.alias)
-  return `Router · ${aliases.length} 个模型 · ${aliases.join(', ')}`
+  return t('services.routerSummary', { count: aliases.length, aliases: aliases.join(', ') })
 }
 
 function draftSummary(config: LaunchConfig | null) {
-  if (!config) return '尚未导入启动模板'
-  if (config.mode === 'single') return `单模型 · ${config.model_alias}`
-  return `Router · ${config.models.filter((item) => item.enabled).map((item) => item.alias).join(', ')}`
+  if (!config) return t('services.noLaunchTemplate')
+  if (config.mode === 'single') return t('services.singleSummary', { alias: config.model_alias })
+  return t('services.routerDraftSummary', { aliases: config.models.filter((item) => item.enabled).map((item) => item.alias).join(', ') })
 }
 
 async function saveBase(silent = false) {
   const saved = selectedId.value
-    ? await api<LlamaService>(`/services/${selectedId.value}`, { method: 'PATCH', ...jsonBody(basePayload()) })
-    : await api<LlamaService>('/services', { method: 'POST', ...jsonBody(basePayload()) })
+    ? await servicesApi.update(selectedId.value, basePayload())
+    : await servicesApi.create(basePayload())
   selectedId.value = saved.id
   await fetchServices(saved.id, false)
-  if (!silent) store.notify('success', 'Service 基础与 systemd 配置已保存')
+  if (!silent) store.notify('success', t('services.baseSaved'))
   return saved
 }
 
 async function save() {
-  busy.value = true
-  try {
-    await saveBase()
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '保存失败')
-  } finally {
-    busy.value = false
-  }
+  await runBusy('service.save', async () => {
+    try {
+      await saveBase()
+    } catch (error) {
+      store.notify('error', error instanceof Error ? error.message : t('services.saveFailed'))
+    }
+  })
 }
 
 async function importProfile() {
-  if (!selectedId.value) return store.notify('error', '请先创建并保存 Service')
-  if (!profileId.value) return store.notify('error', '请选择 Profile')
-  if (draft.value && !confirm('导入会替换当前 Service 的本地启动副本，是否继续？')) return
-  busy.value = true
-  try {
-    const service = await api<LlamaService>(`/services/${selectedId.value}/select-profile`, {
-      method: 'POST', ...jsonBody({ profile_id: profileId.value }),
-    })
-    await fetchServices(service.id)
-    editingDraft.value = true
-    store.notify('success', '模板已复制到本 Service；后续修改不会影响原 Profile')
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '导入失败')
-  } finally {
-    busy.value = false
-  }
+  const serviceId = selectedId.value
+  if (!serviceId) return store.notify('error', t('services.saveFirst'))
+  if (!profileId.value) return store.notify('error', t('services.selectProfilePrompt'))
+  if (draft.value && !confirm(t('services.importConfirm'))) return
+  await runBusy('service.importProfile', async () => {
+    try {
+      const service = await servicesApi.selectProfile(serviceId, profileId.value)
+      await fetchServices(service.id)
+      editingDraft.value = true
+      store.notify('success', t('services.importedIndependent'))
+    } catch (error) {
+      store.notify('error', error instanceof Error ? error.message : t('services.importFailed'))
+    }
+  })
 }
 
 async function saveDraft(silent = false) {
-  if (!selectedId.value || !draft.value) throw new Error('请先导入 Profile')
-  const service = await api<LlamaService>(`/services/${selectedId.value}/launch-config`, {
-    method: 'PATCH', ...jsonBody(draft.value),
+  await runBusy('service.saveDraft', async () => {
+    if (!selectedId.value || !draft.value) throw new Error(t('services.importFirst'))
+    const service = await servicesApi.updateLaunchConfig(selectedId.value, draft.value)
+    draft.value = cloneConfig(service.draft_launch_config)
+    await fetchServices(service.id, false)
+    if (!silent) store.notify('success', t('services.draftSavedPending'))
   })
-  draft.value = cloneConfig(service.draft_launch_config)
-  await fetchServices(service.id, false)
-  if (!silent) store.notify('success', '本 Service 的启动副本已保存，尚未部署')
 }
 
 async function persistDisplayedConfig() {
   await saveBase(true)
-  if (!draft.value) throw new Error('请先从 Profile 导入启动配置')
+  if (!draft.value) throw new Error(t('services.importLaunchFirst'))
   await saveDraft(true)
 }
 
 async function renderPreview() {
-  busy.value = true
-  try {
-    await persistDisplayedConfig()
-    const result = await api<{ content: string }>(`/services/${selectedId.value}/preview-unit`, { method: 'POST' })
-    preview.value = result.content
-    store.notify('success', '已按当前 Service 草稿生成预览，未写入 systemd')
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '预览失败')
-  } finally {
-    busy.value = false
-  }
+  const serviceId = selectedId.value
+  if (!serviceId) return store.notify('error', t('services.saveFirst'))
+  await runBusy('service.preview', async () => {
+    try {
+      await persistDisplayedConfig()
+      const result = await servicesApi.previewUnit(serviceId)
+      preview.value = result.content
+      store.notify('success', t('services.previewGenerated'))
+    } catch (error) {
+      store.notify('error', error instanceof Error ? error.message : t('services.previewFailed'))
+    }
+  })
 }
 
 async function deploy() {
-  if (!selectedId.value) return store.notify('error', '请先保存 Service')
-  busy.value = true
-  try {
-    await persistDisplayedConfig()
-    const result = await api<{ ok: boolean }>(`/services/${selectedId.value}/deploy`, { method: 'POST' })
-    if (!result.ok) throw new Error('部署命令执行失败，上一份 applied 配置保持不变')
-    store.notify('success', 'unit 已写入并执行 daemon-reload、enable --now 与 status')
-    await fetchServices(selectedId.value)
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '部署失败')
-  } finally {
-    busy.value = false
-  }
+  const serviceId = selectedId.value
+  if (!serviceId) return store.notify('error', t('services.saveFirst'))
+  await runBusy('service.deploy', async () => {
+    try {
+      await persistDisplayedConfig()
+      const result = await servicesApi.deploy(serviceId)
+      if (!result.ok) throw new Error(t('services.deployCommandFailed'))
+      store.notify('success', t('services.deploySuccess'))
+      await fetchServices(serviceId)
+    } catch (error) {
+      store.notify('error', error instanceof Error ? error.message : t('services.deployFailed'))
+    }
+  })
 }
 
 async function action(value: 'start' | 'stop' | 'restart') {
-  if (!selectedId.value) return
-  try {
-    const result = await api<{ ok: boolean; stderr: string }>(`/services/${selectedId.value}/action`, {
-      method: 'POST', ...jsonBody({ action: value }),
-    })
-    store.notify(result.ok ? 'success' : 'error', result.ok ? `${value} 已完成` : result.stderr || `${value} 失败`)
-    await fetchServices(selectedId.value, false)
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : `${value} 失败`)
-  }
+  const serviceId = selectedId.value
+  if (!serviceId) return
+  await runBusy(`service.${value}`, async () => {
+    try {
+      const result = await servicesApi.action(serviceId, value)
+      store.notify(result.ok ? 'success' : 'error', result.ok ? t('services.actionDone', { action: t(`services.${value}`) }) : result.stderr || t('services.actionFailed', { action: t(`services.${value}`) }))
+      await fetchServices(serviceId, false)
+    } catch (error) {
+      store.notify('error', error instanceof Error ? error.message : t('services.actionFailed', { action: t(`services.${value}`) }))
+    }
+  })
 }
 
 async function showLogs() {
-  if (!selectedId.value) return
+  const serviceId = selectedId.value
+  if (!serviceId) return
   try {
-    const result = await api<{ stdout: string; stderr: string }>(`/services/${selectedId.value}/logs`)
-    logs.value = result.stdout || result.stderr || '暂无日志。'
+    const result = await servicesApi.logs(serviceId)
+    logs.value = result.stdout || result.stderr || t('services.noLogs')
   } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '读取日志失败')
+    store.notify('error', error instanceof Error ? error.message : t('services.logsFailed'))
   }
 }
 
 async function archive() {
-  if (!selectedId.value || !confirm('停止、禁用并归档这个服务？')) return
-  await api(`/services/${selectedId.value}/archive`, { method: 'POST' })
-  store.notify('success', '服务已归档')
-  await fetchServices(selectedId.value)
+  const serviceId = selectedId.value
+  if (!serviceId || !confirm(t('services.archiveConfirm'))) return
+  await runBusy('service.archive', async () => {
+    await servicesApi.archive(serviceId)
+    store.notify('success', t('services.archived'))
+    await fetchServices(serviceId)
+  })
 }
 
 async function restore() {
-  if (!selectedId.value) return
-  await api(`/services/${selectedId.value}/restore`, { method: 'POST' })
-  store.notify('success', '服务文件已恢复，请按需重新部署')
-  await fetchServices(selectedId.value)
+  const serviceId = selectedId.value
+  if (!serviceId) return
+  await runBusy('service.restore', async () => {
+    await servicesApi.restore(serviceId)
+    store.notify('success', t('services.restoreSuccess'))
+    await fetchServices(serviceId)
+  })
 }
 
 async function remove() {
-  if (!selectedId.value || !confirm('彻底停止、禁用并删除 unit 与 Service 配置？模型文件不会删除。')) return
-  await api(`/services/${selectedId.value}`, { method: 'DELETE' })
-  store.notify('success', 'Service 与 unit 文件已删除')
-  reset()
-  await fetchServices()
+  const serviceId = selectedId.value
+  if (!serviceId || !confirm(t('services.deleteFullConfirm'))) return
+  await runBusy('service.delete', async () => {
+    await servicesApi.delete(serviceId)
+    store.notify('success', t('services.deleted'))
+    reset()
+    await fetchServices()
+  })
 }
 
 async function copyPreview() {
   await navigator.clipboard.writeText(preview.value)
-  store.notify('success', 'unit 内容已复制')
+  store.notify('success', t('services.unitCopied'))
 }
 
 function downloadPreview() {
@@ -258,42 +272,42 @@ onMounted(load)
   <div class="profile-workspace service-workspace">
     <aside class="profile-list-pane">
       <div class="pane-heading">
-        <strong>Services</strong>
-        <button class="icon-button" type="button" aria-label="新建服务" @click="reset"><IconPlus :size="18" /></button>
+        <strong>{{ t('services.title') }}</strong>
+        <button class="icon-button" type="button" :aria-label="t('services.new')" @click="reset"><IconPlus :size="18" /></button>
       </div>
       <button v-for="service in services" :key="service.id" class="profile-list-item" :class="{ active: selectedId === service.id }" @click="applyService(service)">
         <span><strong>{{ service.name }}</strong><small>{{ service.unit_name }} · {{ service.host }}:{{ service.port }}</small></span>
         <StatusBadge :status="service.archived_at ? 'archived' : service.status?.ok ? 'active' : 'inactive'" />
       </button>
-      <div v-if="!services.length" class="empty-state compact">还没有 Llama Service。</div>
+      <div v-if="!services.length" class="empty-state compact">{{ t('services.noLlamaServices') }}</div>
     </aside>
 
     <form class="profile-editor" @submit.prevent="save">
       <div class="editor-heading">
         <div>
-          <h2>{{ selectedId ? '编辑 Service' : '创建 Service' }}</h2>
-          <p>Service 只负责运行环境和 systemd；模型与 llama 参数从 Profile 复制为本地草稿。</p>
+          <h2>{{ selectedId ? t('services.editService') : t('services.createService') }}</h2>
+          <p>{{ t('services.description') }}</p>
         </div>
-        <button class="button primary" :disabled="busy"><IconDeviceFloppy :size="17" />{{ selectedId ? '保存基础配置' : '创建 Service' }}</button>
+        <button class="button primary" :disabled="isBusy('service.save')"><IconDeviceFloppy :size="17" />{{ selectedId ? t('services.saveBase') : t('services.createService') }}</button>
       </div>
 
-      <PageSection title="基础配置">
+      <PageSection :title="t('services.baseConfig')">
         <div class="form-grid two-columns">
-          <label class="field"><span>服务名称</span><input v-model.trim="form.name" required /></label>
-          <label class="field"><span>Unit 名称</span><input v-model.trim="form.unit_name" :disabled="!!selectedId" placeholder="自动生成 llamalens-*.service" /></label>
-          <label class="field"><span>描述</span><input v-model="form.description" placeholder="显示在 systemctl status 中" /></label>
-          <label class="field"><span>llama-server 路径</span><input v-model.trim="form.server_bin" required /></label>
+          <label class="field"><span>{{ t('services.serviceName') }}</span><input v-model.trim="form.name" required /></label>
+          <label class="field"><span>{{ t('services.unitName') }}</span><input v-model.trim="form.unit_name" :disabled="!!selectedId" :placeholder="t('services.unitNamePlaceholder')" /></label>
+          <label class="field"><span>{{ t('services.fieldDescription') }}</span><input v-model="form.description" :placeholder="t('services.descriptionPlaceholder')" /></label>
+          <label class="field"><span>{{ t('services.serverPath') }}</span><input v-model.trim="form.server_bin" required /></label>
           <label class="field"><span>WorkingDirectory</span><input v-model.trim="form.working_directory" required /></label>
           <label class="field"><span>User</span><input v-model.trim="form.service_user" required /></label>
           <label class="field"><span>Group</span><input v-model.trim="form.service_group" required /></label>
           <label class="field"><span>Host</span><input v-model.trim="form.host" required /></label>
           <label class="field"><span>Port</span><input v-model.number="form.port" type="number" min="1" max="65535" required /></label>
-          <label class="field"><span>健康检查路径</span><input v-model.trim="form.health_path" required /></label>
-          <label class="field"><span>Benchmark 请求路径</span><input v-model.trim="form.request_path" required /></label>
+          <label class="field"><span>{{ t('services.healthPath') }}</span><input v-model.trim="form.health_path" required /></label>
+          <label class="field"><span>{{ t('services.benchmarkPath') }}</span><input v-model.trim="form.request_path" required /></label>
         </div>
       </PageSection>
 
-      <PageSection title="Service 进程与重启策略" description="这些指令写入 [Service] 段；Type=exec 适合前台运行的 llama-server，Restart=on-failure 可在异常退出时自动拉起。">
+      <PageSection :title="t('services.processPolicy')" :description="t('services.processPolicyDesc')">
         <div class="form-grid two-columns">
           <label class="field">
             <span>Type</span>
@@ -320,69 +334,69 @@ onMounted(load)
               <option value="always">always</option>
             </select>
           </label>
-          <label class="field"><span>RestartSec（秒）</span><input v-model.number="form.restart_sec" type="number" min="0" step="1" required /></label>
+          <label class="field"><span>{{ t('services.restartSeconds') }}</span><input v-model.number="form.restart_sec" type="number" min="0" step="1" required /></label>
         </div>
       </PageSection>
 
-      <PageSection title="启动 Profile" description="选择只负责复制模板；不会自动部署、重启，也不会与原 Profile 保持联动。">
-        <div v-if="!selectedId" class="empty-state compact">请先创建 Service，再导入 Profile 模板。</div>
+      <PageSection :title="t('services.startProfile')" :description="t('services.startProfileDesc')">
+        <div v-if="!selectedId" class="empty-state compact">{{ t('services.createBeforeImport') }}</div>
         <template v-else>
           <div class="profile-import-row">
-            <label class="field"><span>选择 Profile</span><select v-model="profileId"><option value="" disabled>选择 Profile</option><option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label>
-            <div class="profile-import-summary"><strong>{{ chosenProfile?.name || '未选择' }}</strong><span>{{ profileSummary(chosenProfile) }}</span></div>
-            <button type="button" class="button secondary" :disabled="busy || !profileId" @click="importProfile"><IconTemplate :size="17" />导入模板</button>
+            <label class="field"><span>{{ t('services.selectProfile') }}</span><select v-model="profileId"><option value="" disabled>{{ t('services.selectProfile') }}</option><option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label>
+            <div class="profile-import-summary"><strong>{{ chosenProfile?.name || t('services.notSelected') }}</strong><span>{{ profileSummary(chosenProfile) }}</span></div>
+            <button type="button" class="button secondary" :disabled="isBusy('service.importProfile') || !profileId" @click="importProfile"><IconTemplate :size="17" />{{ t('services.importProfile') }}</button>
           </div>
-          <div v-if="!profiles.length" class="risk-banner neutral">还没有 Profile，请先到 Profiles 页面创建启动模板。</div>
+          <div v-if="!profiles.length" class="risk-banner neutral">{{ t('services.noProfiles') }}</div>
 
           <div class="local-copy-card" :class="{ pending: localPending }">
             <div>
-              <span class="service-kicker">Service 本地副本</span>
+              <span class="service-kicker">{{ t('services.localCopy') }}</span>
               <strong>{{ draftSummary(draft) }}</strong>
-              <small>来源：{{ sourceProfile?.name || (selected?.source_profile_id ? '原 Profile 已删除' : '无') }}。修改不会影响原 Profile 或其他 Service。</small>
+              <small>{{ t('services.source') }}：{{ sourceProfile?.name || (selected?.source_profile_id ? t('services.sourceDeleted') : t('services.noSource')) }}。{{ t('services.copyIndependent') }}</small>
             </div>
             <div class="inline-actions">
-              <StatusBadge :status="localPending ? 'pending' : selected?.applied_launch_config ? 'applied' : 'draft'" :label="localPending ? '有未部署修改' : selected?.applied_launch_config ? '已应用' : '仅草稿'" />
-              <button v-if="draft" type="button" class="button secondary" @click="editingDraft = !editingDraft"><IconEdit :size="17" />{{ editingDraft ? '收起编辑器' : '编辑本服务副本' }}</button>
+              <StatusBadge :status="localPending ? 'pending' : selected?.applied_launch_config ? 'applied' : 'draft'" :label="localPending ? t('services.pendingChanges') : selected?.applied_launch_config ? t('services.applied') : t('services.draftOnly')" />
+              <button v-if="draft" type="button" class="button secondary" @click="editingDraft = !editingDraft"><IconEdit :size="17" />{{ editingDraft ? t('services.collapseEditor') : t('services.editLocalCopy') }}</button>
             </div>
           </div>
 
           <div v-if="draft && editingDraft" class="local-copy-editor">
             <LaunchConfigEditor :config="draft" :models="models" :catalog="catalog" />
             <div class="inline-actions editor-save-row">
-              <span class="muted-copy">这里只保存草稿，不会触发 systemd 操作。</span>
-              <button type="button" class="button secondary" :disabled="busy" @click="saveDraft().catch((error) => store.notify('error', error.message))"><IconDeviceFloppy :size="17" />保存本地副本</button>
+              <span class="muted-copy">{{ t('services.draftOnlyHint') }}</span>
+              <button type="button" class="button secondary" :disabled="isBusy('service.saveDraft')" @click="saveDraft().catch((error) => store.notify('error', error.message))"><IconDeviceFloppy :size="17" />{{ t('services.saveDraft') }}</button>
             </div>
           </div>
         </template>
       </PageSection>
 
-      <PageSection title="Systemd 自定义参数" description="每行一个 systemd 指令；内容追加到对应 section，并禁止新增 section 或重复 ExecStart。">
+      <PageSection :title="t('services.systemdCustom')" :description="t('services.systemdCustomDesc')">
         <div class="unit-section-grid">
-          <label class="field"><span>[Unit] 追加内容</span><textarea v-model="form.unit_extra_text" rows="6" placeholder="RequiresMountsFor=/opt/models" /></label>
-          <label class="field"><span>[Service] 追加内容</span><textarea v-model="form.service_extra_text" rows="6" placeholder="Environment=CUDA_VISIBLE_DEVICES=0&#10;LimitNOFILE=1048576" /></label>
-          <label class="field"><span>[Install] 追加内容</span><textarea v-model="form.install_extra_text" rows="6" placeholder="Alias=my-llama.service" /></label>
+          <label class="field"><span>{{ t('services.unitExtra') }}</span><textarea v-model="form.unit_extra_text" rows="6" placeholder="RequiresMountsFor=/opt/models" /></label>
+          <label class="field"><span>{{ t('services.serviceExtra') }}</span><textarea v-model="form.service_extra_text" rows="6" placeholder="Environment=CUDA_VISIBLE_DEVICES=0&#10;LimitNOFILE=1048576" /></label>
+          <label class="field"><span>{{ t('services.installExtra') }}</span><textarea v-model="form.install_extra_text" rows="6" placeholder="Alias=my-llama.service" /></label>
         </div>
       </PageSection>
 
-      <PageSection title="Unit 文件预览" description="生成预览会保存当前基础配置与启动草稿，但不会写入 /etc/systemd/system。">
+      <PageSection :title="t('services.unitPreview')" :description="t('services.unitPreviewDesc')">
         <div class="inline-actions preview-actions">
-          <button type="button" class="button secondary" :disabled="busy || !draft" @click="renderPreview"><IconRefresh :size="17" />生成预览</button>
-          <button type="button" class="button secondary" :disabled="!preview" @click="copyPreview"><IconCopy :size="17" />复制</button>
-          <button type="button" class="button secondary" :disabled="!preview" @click="downloadPreview"><IconDownload :size="17" />下载</button>
+          <button type="button" class="button secondary" :disabled="isBusy('service.preview') || !draft" @click="renderPreview"><IconRefresh :size="17" />{{ t('services.preview') }}</button>
+          <button type="button" class="button secondary" :disabled="!preview" @click="copyPreview"><IconCopy :size="17" />{{ t('services.copy') }}</button>
+          <button type="button" class="button secondary" :disabled="!preview" @click="downloadPreview"><IconDownload :size="17" />{{ t('services.download') }}</button>
         </div>
-        <pre class="code-block unit-preview">{{ preview || '导入 Profile 后点击“生成预览”。' }}</pre>
+        <pre class="code-block unit-preview">{{ preview || t('services.previewHint') }}</pre>
       </PageSection>
 
       <div v-if="selectedId" class="sticky-actions service-actions">
-        <span v-if="selected?.applied_launch_config" class="applied-source">已应用来源：{{ appliedProfile?.name || '本地/历史模板' }}</span>
-        <button type="button" class="button primary" :disabled="busy || !draft || !!selected?.archived_at" @click="deploy"><IconRocket :size="17" />应用并部署</button>
-        <button type="button" class="button secondary" :disabled="!!selected?.archived_at" @click="action('start')"><IconPlayerPlay :size="17" />启动</button>
-        <button type="button" class="button secondary" :disabled="!!selected?.archived_at" @click="action('stop')"><IconPlayerPause :size="17" />停止</button>
-        <button type="button" class="button secondary" :disabled="!!selected?.archived_at" @click="action('restart')"><IconRefresh :size="17" />重启</button>
-        <button type="button" class="button secondary" @click="showLogs">日志</button>
-        <button v-if="!selected?.archived_at" type="button" class="button secondary" @click="archive"><IconArchive :size="17" />归档</button>
-        <button v-else type="button" class="button secondary" @click="restore"><IconRestore :size="17" />恢复</button>
-        <button type="button" class="button danger" @click="remove"><IconTrash :size="17" />彻底删除</button>
+        <span v-if="selected?.applied_launch_config" class="applied-source">{{ t('services.appliedSource') }}：{{ appliedProfile?.name || t('services.localHistoryTemplate') }}</span>
+        <button type="button" class="button primary" :disabled="isBusy('service.deploy') || !draft || !!selected?.archived_at" @click="deploy"><IconRocket :size="17" />{{ t('services.deploy') }}</button>
+        <button type="button" class="button secondary" :disabled="!!selected?.archived_at || isBusy('service.start')" @click="action('start')"><IconPlayerPlay :size="17" />{{ t('services.start') }}</button>
+        <button type="button" class="button secondary" :disabled="!!selected?.archived_at || isBusy('service.stop')" @click="action('stop')"><IconPlayerPause :size="17" />{{ t('services.stop') }}</button>
+        <button type="button" class="button secondary" :disabled="!!selected?.archived_at || isBusy('service.restart')" @click="action('restart')"><IconRefresh :size="17" />{{ t('services.restart') }}</button>
+        <button type="button" class="button secondary" @click="showLogs">{{ t('services.logs') }}</button>
+        <button v-if="!selected?.archived_at" type="button" class="button secondary" :disabled="isBusy('service.archive')" @click="archive"><IconArchive :size="17" />{{ t('services.archive') }}</button>
+        <button v-else type="button" class="button secondary" :disabled="isBusy('service.restore')" @click="restore"><IconRestore :size="17" />{{ t('services.restore') }}</button>
+        <button type="button" class="button danger" :disabled="isBusy('service.delete')" @click="remove"><IconTrash :size="17" />{{ t('services.deletePermanently') }}</button>
       </div>
       <pre v-if="logs" class="code-block">{{ logs }}</pre>
     </form>

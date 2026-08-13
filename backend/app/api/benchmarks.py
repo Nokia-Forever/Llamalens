@@ -1,8 +1,8 @@
 import json
 import statistics
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -15,22 +15,23 @@ router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
 DELETABLE_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
-def _serialize(job: BenchmarkJob, include_attempts: bool = False):
+def _serialize(job: BenchmarkJob, include_attempts: bool = False, lightweight: bool = False):
     config = json.loads(job.config_json)
     summary = json.loads(job.summary_json)
     metrics = summary.get("metrics", {})
-    successful_attempts = [attempt for attempt in job.attempts if not attempt.warmup and attempt.status == "succeeded"]
-    for key, values in {
-        "ttft_ms": [attempt.ttft_ms for attempt in successful_attempts],
-        "prefill_tps": [attempt.prefill_tps for attempt in successful_attempts],
-        "decode_tps": [attempt.decode_tps for attempt in successful_attempts],
-        "client_decode_tps": [attempt.client_decode_tps for attempt in successful_attempts],
-        "total_ms": [attempt.total_ms for attempt in successful_attempts],
-    }.items():
-        metric = metrics.setdefault(key, {})
-        if "average" not in metric:
-            values = [value for value in values if value is not None]
-            metric["average"] = statistics.fmean(values) if values else None
+    if not lightweight:
+        successful_attempts = [attempt for attempt in job.attempts if not attempt.warmup and attempt.status == "succeeded"]
+        for key, values in {
+            "ttft_ms": [attempt.ttft_ms for attempt in successful_attempts],
+            "prefill_tps": [attempt.prefill_tps for attempt in successful_attempts],
+            "decode_tps": [attempt.decode_tps for attempt in successful_attempts],
+            "client_decode_tps": [attempt.client_decode_tps for attempt in successful_attempts],
+            "total_ms": [attempt.total_ms for attempt in successful_attempts],
+        }.items():
+            metric = metrics.setdefault(key, {})
+            if "average" not in metric:
+                values = [value for value in values if value is not None]
+                metric["average"] = statistics.fmean(values) if values else None
     service_snapshot = config.get("service_snapshot")
     if isinstance(service_snapshot, dict) and "unit_content" in service_snapshot:
         service_snapshot = dict(service_snapshot)
@@ -125,12 +126,18 @@ def create(payload: BenchmarkCreate, db: Session = Depends(get_db)):
 
 
 @router.get("")
-def list_jobs(task_id: str | None = None, db: Session = Depends(get_db)):
-    query = select(BenchmarkJob).order_by(BenchmarkJob.created_at.desc()).limit(200)
+def list_jobs(
+    task_id: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    statement = select(BenchmarkJob).order_by(BenchmarkJob.created_at.desc())
     if task_id is not None:
-        query = query.where(BenchmarkJob.task_id == task_id)
-    jobs = db.scalars(query).all()
-    return [_serialize(job) for job in jobs]
+        statement = statement.where(BenchmarkJob.task_id == task_id)
+    total = db.scalar(select(func.count()).select_from(statement.subquery()))
+    jobs = db.scalars(statement.offset(offset).limit(limit)).all()
+    return {"items": [_serialize(job, lightweight=True) for job in jobs], "total": total, "offset": offset, "limit": limit}
 
 
 @router.get("/{job_id}")

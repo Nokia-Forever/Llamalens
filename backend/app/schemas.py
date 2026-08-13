@@ -183,7 +183,7 @@ class TaskOut(BaseModel):
 
 
 class QueuePatch(BaseModel):
-    status: Literal["start", "pause"] | None = None
+    status: Literal["start", "pause", "stop"] | None = None
     interval_ms: int | None = Field(default=None, ge=0, le=86400000)
     cancel_timeout_ms: int | None = Field(default=None, ge=1000, le=600000)
 

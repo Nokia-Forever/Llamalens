@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.models import LlamaService, Profile, ProfileModel
 from app.schemas import AppSettings, LaunchConfig, LlamaServiceCreate
 from app.services.profiles_service import build_launch_argv, launch_config_from_profile, normalize_launch_config
-from app.services.systemd import daemon_reload, read_unit_journal, run_unit_action
+from app.services.systemd import CommandResult, daemon_reload, read_unit_journal, run_unit_action
 
 
 MANAGED_UNIT_PATTERN = re.compile(r"llamalens-[A-Za-z0-9_.@-]+\.service")
@@ -191,7 +191,7 @@ def _assign(row: LlamaService, payload: LlamaServiceCreate, unit_name: str) -> N
     row.install_extra_text = payload.install_extra_text
 
 
-def serialize_service(row: LlamaService, status: bool = False) -> dict[str, object]:
+def serialize_service(row: LlamaService, status: bool = False, unit_status: dict[str, CommandResult] | None = None) -> dict[str, object]:
     draft = _decode_launch(row.draft_launch_config_json)
     applied = _decode_launch(row.applied_launch_config_json)
     current_service_config = payload_for_service(row).model_dump(mode="json")
@@ -217,7 +217,11 @@ def serialize_service(row: LlamaService, status: bool = False) -> dict[str, obje
         "archived_at": row.archived_at, "created_at": row.created_at, "updated_at": row.updated_at,
     }
     if status:
-        result["status"] = run_unit_action(row.unit_name, "status").__dict__
+        if unit_status is not None:
+            cr = unit_status.get(row.unit_name)
+            result["status"] = cr.__dict__ if cr else CommandResult(False, ["systemctl", "status", row.unit_name], None, "", "unit not found").__dict__
+        else:
+            result["status"] = run_unit_action(row.unit_name, "status").__dict__
     return result
 
 

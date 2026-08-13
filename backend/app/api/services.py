@@ -19,7 +19,7 @@ from app.services.llama_services import (
     update_service,
 )
 from app.services.settings_service import get_settings
-from app.services.systemd import run_unit_action
+from app.services.systemd import list_units_status, run_unit_action
 
 
 router = APIRouter(prefix="/services", tags=["services"])
@@ -37,7 +37,9 @@ def list_services(include_archived: bool = False, with_status: bool = False, db:
     statement = select(LlamaService).order_by(LlamaService.created_at.desc())
     if not include_archived:
         statement = statement.where(LlamaService.archived_at.is_(None))
-    return [serialize_service(row, status=with_status) for row in db.scalars(statement).all()]
+    rows = db.scalars(statement).all()
+    status_map = list_units_status("llamalens-*") if with_status else None
+    return [serialize_service(row, status=with_status, unit_status=status_map) for row in rows]
 
 
 @router.post("")

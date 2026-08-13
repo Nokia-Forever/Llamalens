@@ -1,10 +1,11 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import TaskQueue, TaskQueueItem
+from app.models import BenchmarkTask, TaskQueue, TaskQueueItem
 from app.schemas import TaskCreate, TaskUpdate
 from app.services import task_service
 
@@ -12,8 +13,15 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 @router.get("")
-def list_tasks(db: Session = Depends(get_db)):
-    return [task_service.serialize_task(task).model_dump(mode="json") for task in task_service.list_tasks(db)]
+def list_tasks(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    base = select(BenchmarkTask).order_by(BenchmarkTask.updated_at.desc())
+    total = db.scalar(select(func.count()).select_from(base.subquery()))
+    tasks = task_service.list_tasks(db, offset=offset, limit=limit)
+    return {"items": [task_service.serialize_task(task).model_dump(mode="json") for task in tasks], "total": total, "offset": offset, "limit": limit}
 
 
 @router.post("")

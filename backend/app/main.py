@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api import arguments, auth, benchmarks, models, profiles, queue, services, settings, system, tasks
+from app.api import arguments, auth, benchmarks, events, models, profiles, queue, services, settings, system, tasks
 from app.database import SessionLocal, get_db, init_db
 from app.logging_config import get_logger, setup_logging
 from app.services.arguments import seed_builtin_catalog
@@ -87,9 +87,23 @@ def health(db: Session = Depends(get_db)) -> dict[str, str]:
 @app.get("/api/v1/ready")
 def ready(db: Session = Depends(get_db)) -> dict[str, object]:
     db_status = _db_ping(db)
-    scheduler_alive = task_queue.get_scheduler().is_alive()
-    status = "ready" if db_status == "ok" and scheduler_alive else "degraded"
-    return {"status": status, "checks": {"db": db_status, "scheduler_alive": scheduler_alive}}
+    scheduler = task_queue.get_scheduler()
+    scheduler_alive = scheduler.is_alive()
+    diag = scheduler.diagnostics()
+    queue_diag = task_queue.get_queue_diagnostics(db)
+    queue_status = queue_diag["queue_status"]
+    scheduler_failures = diag["consecutive_failures"]
+    healthy = db_status == "ok" and scheduler_alive and queue_status != "error" and scheduler_failures == 0
+    status = "ready" if healthy else "degraded"
+    return {
+        "status": status,
+        "checks": {
+            "db": db_status,
+            "scheduler_alive": scheduler_alive,
+            "queue_status": queue_status,
+            "scheduler_failures": scheduler_failures,
+        },
+    }
 
 
 app.include_router(auth.router, prefix="/api/v1")
@@ -100,6 +114,8 @@ API_ROUTERS = [
 ]
 for router in API_ROUTERS:
     app.include_router(router, prefix="/api/v1", dependencies=[Depends(auth.verify_auth)])
+
+app.include_router(events.router, prefix="/api/v1")
 
 
 frontend_dist = Path(os.getenv("LLAMALENS_FRONTEND_DIST", Path(__file__).resolve().parents[2] / "frontend" / "dist"))

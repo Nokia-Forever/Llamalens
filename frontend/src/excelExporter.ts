@@ -36,7 +36,7 @@ function stamp(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`
 }
 
-export async function exportObservationExcel(params: ExportParams): Promise<void> {
+export async function buildWorkbookBlob(params: ExportParams): Promise<Blob> {
   const { jobs, metrics, includeAttempts, images } = params
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'LlamaLens'
@@ -156,11 +156,19 @@ export async function exportObservationExcel(params: ExportParams): Promise<void
   }
 
   const buffer = await workbook.xlsx.writeBuffer()
-  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+}
+
+export function downloadBlob(blob: Blob, fileName: string = `llamalens-observation-${stamp()}.xlsx`): void {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `llamalens-observation-${stamp()}.xlsx`
+  link.download = fileName
   link.click()
   URL.revokeObjectURL(url)
+}
+
+export async function exportObservationExcel(params: ExportParams): Promise<void> {
+  const blob = await buildWorkbookBlob(params)
+  downloadBlob(blob)
 }

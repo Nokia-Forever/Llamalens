@@ -49,8 +49,10 @@ def serialize_task(task: BenchmarkTask) -> TaskOut:
     )
 
 
-def list_tasks(db: Session) -> list[BenchmarkTask]:
-    return db.scalars(select(BenchmarkTask).order_by(BenchmarkTask.updated_at.desc())).all()
+def list_tasks(db: Session, offset: int = 0, limit: int = 50) -> list[BenchmarkTask]:
+    return db.scalars(
+        select(BenchmarkTask).order_by(BenchmarkTask.updated_at.desc()).offset(offset).limit(limit)
+    ).all()
 
 
 def get_task(db: Session, task_id: str) -> BenchmarkTask | None:

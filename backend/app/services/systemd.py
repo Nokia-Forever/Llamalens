@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import platform
 import shlex
 import subprocess
@@ -75,6 +76,37 @@ def run_unit_action(unit_name: str, action: str, timeout: int = 30) -> CommandRe
         result = CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
     _log_result("systemctl.unit_action", result)
     return result
+
+
+def list_units_status(pattern: str, timeout: int = 30) -> dict[str, CommandResult]:
+    argv = ["systemctl", "list-units", pattern, "--output=json", "--all", "--no-pager"]
+    try:
+        completed = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+        result = CommandResult(completed.returncode == 0, argv, completed.returncode, completed.stdout, completed.stderr)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        result = CommandResult(False, argv, None, "", f"{type(exc).__name__}: {exc}")
+    _log_result("systemctl.list_units", result)
+    if not result.ok or not result.stdout:
+        return {}
+    try:
+        units = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        logger.warning("systemctl.list_units_parse_failed", extra={"stderr": (result.stderr or "")[:300]})
+        return {}
+    status_map: dict[str, CommandResult] = {}
+    for unit in units:
+        if not isinstance(unit, dict):
+            continue
+        name = unit.get("unit")
+        if not name:
+            continue
+        active = unit.get("active", "unknown")
+        sub = unit.get("sub", "")
+        description = unit.get("description", "")
+        ok = active == "active"
+        stdout_text = f"{active} ({sub})" if sub else active
+        status_map[name] = CommandResult(ok, argv, result.returncode, stdout_text, description)
+    return status_map
 
 
 def daemon_reload(timeout: int = 30) -> CommandResult:

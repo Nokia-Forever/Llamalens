@@ -22,6 +22,7 @@
 | 3. Vue 产品界面 | complete | 概览、设置、模型、Profile、Benchmark、结果页与响应式样式已实现 |
 | 4. 测试与联调 | complete | 10 项 Python 测试、前端构建、API smoke test 和浏览器检查通过 |
 | 5. 部署与文档 | complete | README、示例 unit、sudoers、环境变量和参数参考完整 |
+| 6. Batch 4 前端工程化与实时体验 | complete | API 抽象、cloneConfig、busy、Vitest/ESLint、SSE 与自适应降级、Excel Worker、中英 i18n 已完成；前端 54 tests、后端 70 tests、lint 0 error、production build 通过 |
 
 ## 非目标
 
@@ -45,3 +46,5 @@
 | Backend 目录 smoke test 使用了错误的相对 venv 路径 | 1 | 改为 `..\\.venv\\Scripts\\python.exe` |
 | 规划检查脚本被 PowerShell execution policy 阻止 | 1 | 仅对该只读检查脚本使用单次 `-ExecutionPolicy Bypass` |
 | 规划检查脚本绕过策略后因脚本自身编码损坏无法解析 | 1 | 不修改技能安装文件，改为直接核对阶段表全部为 complete |
+| Batch 4 规划补丁首次因终端输出乱码导致上下文不匹配 | 1 | 强制 UTF-8 读取后按真实中文上下文重新应用补丁 |
+| SSE 空闲订阅在 `queue.Queue.get()` 超时时抛出 `queue.Empty`，连接约 5 秒后异常退出 | 1 | 后端 SSE 同时捕获 `queue.Empty` 与 `asyncio.TimeoutError`，发送 keepalive，并新增生命周期测试 |

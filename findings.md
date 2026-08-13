@@ -42,3 +42,14 @@
 - `npm.ps1` 被执行策略阻止，应使用 `npm.cmd`。
 - 默认 `python` 指向另一个项目环境；可用全局解释器为 `C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe`。
 - Node.js 版本为 24.16.0，npm 版本为 11.13.0。
+
+## 2026-08-13 Batch 4 审计
+
+- 工作区已有大量未提交的批次 2–4 改动，必须保留并在现状基础上收尾。
+- `docs/batch4-design.md` 已存在；前端已出现 `src/api/`、`src/composables/`、`src/workers/`、`src/i18n/`、`src/__tests__/`，后端已出现 `app/api/events.py`，说明实现已推进但尚未完成验收。
+- 根目录原规划文件只记录 V1，未跟踪 Batch 4，本次追加阶段 6。
+- 初始前端构建失败的主因是 `src/api.ts` 与 `src/api/` 同名解析：`export * from './api'` 自引用旧文件，导致模块 API 全部表现为未导出；改为显式 `./api/index` 后恢复。
+- SSE 初始实现存在真实空闲断线缺陷：执行器内 `queue.get(timeout=...)` 抛 `queue.Empty`，原实现未捕获；已修复并用测试覆盖初始事件、keepalive、publish 与 unsubscribe。
+- 当前 Benchmark 页只负责保存/入队并跳转 Tasks 页，没有旧设计所述的 active-job 轮询，因此无需额外接入第二条 SSE；队列实时状态统一由 Tasks 页订阅。
+- 扫描确认 API 层外直接 `fetch/request/api` 调用为 0；`JSON.parse(JSON.stringify())` 仅存在于 `cloneConfig` 的兼容 fallback。
+- i18n 已覆盖页面和共享编辑器/图表；唯一中文源码为语言下拉中的语言名称“中文”。

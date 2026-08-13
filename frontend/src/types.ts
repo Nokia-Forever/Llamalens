@@ -41,6 +41,22 @@ export interface ModelFile {
   available: boolean
 }
 
+export interface RemoteModel {
+  model_id: string
+  downloads: number
+  likes: number
+  files: Array<{ name: string; url: string }>
+}
+
+export interface DownloadJob {
+  id: string
+  target_path: string
+  status: string
+  downloaded_bytes: number
+  total_bytes: number | null
+  error: string | null
+}
+
 export interface Profile {
   id: string
   name: string
@@ -157,7 +173,7 @@ export interface QueueItem {
 
 export interface TaskQueueState {
   id: number
-  status: 'idle' | 'running' | 'paused' | 'stopping'
+  status: 'idle' | 'running' | 'paused' | 'stopping' | 'stopping_queue' | 'error'
   interval_ms: number
   cancel_timeout_ms: number
   current_item_id: string | null
@@ -169,6 +185,12 @@ export interface TaskQueueState {
     successes: number
     failures: number
     canceled: number
+  }
+  scheduler?: {
+    consecutive_failures: number
+    last_error: string | null
+    last_error_at: string | null
+    failure_threshold: number
   }
 }
 

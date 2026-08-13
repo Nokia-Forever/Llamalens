@@ -4,6 +4,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { init, use, type EChartsType } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { BenchmarkJob } from '../../types'
 import { formatMetric, type MetricConfig, type StatKey } from '../../metricsStats'
 import { buildAxisPlan } from './chartAxis'
@@ -15,6 +16,7 @@ const props = defineProps<{
   metrics: MetricConfig[]
   statistic?: StatKey
 }>()
+const { t } = useI18n()
 const element = ref<HTMLDivElement | null>(null)
 let chart: EChartsType | null = null
 
@@ -41,7 +43,7 @@ function draw() {
         trigger: 'item',
         formatter: (params: { name: string; seriesName: string; value: number[] }) => {
           const [min, p10, median, p90, max] = params.value
-          return `${params.name}<br/><strong>${params.seriesName}</strong><br/>min: ${formatMetric(min)}<br/>p10: ${formatMetric(p10)}<br/>中位: ${formatMetric(median)}<br/>p90: ${formatMetric(p90)}<br/>max: ${formatMetric(max)}`
+          return `${params.name}<br/><strong>${params.seriesName}</strong><br/>min: ${formatMetric(min)}<br/>p10: ${formatMetric(p10)}<br/>${t('observation.median')}: ${formatMetric(median)}<br/>p90: ${formatMetric(p90)}<br/>max: ${formatMetric(max)}`
         },
       },
       legend: { data: metrics.map((metric) => metric.label), textStyle: { color: '#7c858f' } },

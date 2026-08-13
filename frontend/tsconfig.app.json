@@ -13,6 +13,8 @@
     "types": ["vite/client", "node"],
     "noEmit": true,
     "skipLibCheck": true
+    ,"baseUrl": "."
+    ,"paths": { "@/*": ["src/*"] }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
 }

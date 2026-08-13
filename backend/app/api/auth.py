@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -53,6 +53,18 @@ def verify_auth(request: Request, db: Session = Depends(get_db)) -> None:
     raise HTTPException(status_code=401, detail="unauthorized")
 
 
+def verify_auth_query(request: Request, token: str | None = Query(default=None), db: Session = Depends(get_db)) -> None:
+    host = request.client.host if request.client else ""
+    if is_loopback(host) and not require_auth_forced():
+        return
+    if not auth_enabled(db):
+        return
+    if token and verify_token(db, token):
+        return
+    logger.warning("auth.failed", extra={"path": request.url.path, "reason": "missing_or_invalid"})
+    raise HTTPException(status_code=401, detail="unauthorized")
+
+
 @router.get("/status")
 def auth_status(request: Request, db: Session = Depends(get_db)) -> dict[str, bool]:
     host = request.client.host if request.client else ""
@@ -77,4 +89,4 @@ def rotate(payload: RotateTokenInput, db: Session = Depends(get_db)) -> dict[str
     return {"ok": True, "updated_at": updated.isoformat()}
 
 
-__all__ = ["router", "verify_auth", "EXEMPT_PATHS", "bootstrap_from_env"]
+__all__ = ["router", "verify_auth", "verify_auth_query", "EXEMPT_PATHS", "bootstrap_from_env"]

@@ -33,3 +33,17 @@
 - 所有计划阶段已完成。
 - 规划完整性脚本首次被系统执行策略阻止，改用单次 Bypass 运行检查。
 - 检查脚本自身存在编码损坏并无法解析；已人工核对 5 个阶段均为 complete，不修改外部技能文件。
+
+## 2026-08-13 Batch 4 继续实施
+
+- 开始对照 `docs/batch4-design.md` 审计完成度。
+- 已确认工作区包含 Batch 4 的部分实现与大量未提交改动；后续只做增量修复，不覆盖或回退已有工作。
+- 当前阶段：逐项核对文件、API 调用、busy、SSE、Worker、i18n、测试与 lint，并运行完整验收。
+- 修复 API 入口自引用、TypeScript `@` alias、API_BASE 导出、测试类型与 nullable ID，恢复前端 production build。
+- 新增 `src/config.ts`，SSE 重连与降级轮询集中配置；断线时 running/stopping 1s、idle 5s 自适应轮询。
+- 后端 SSE keepalive 与订阅队列上限支持环境变量，并修复空闲 `queue.Empty` 导致连接断开的问题。
+- 增加 SSE 初始事件、keepalive、发布/退订测试；后端测试由 67 增至 70 passed。
+- 补齐 Tasks、Profiles、Services 写操作 busy 防重和模板 disabled 状态。
+- 完成 Profiles、Services、LaunchConfigEditor 与观测图表中英文文案提取。
+- 最终验收：前端 54 tests passed；后端 70 passed（1 条上游 TestClient 弃用 warning）；ESLint 0 error、13 warnings；production build 成功并生成独立 Excel Worker chunk；`git diff --check` 通过。
+- 已同步更新 `docs/optimization-plan.md`：批次 4 与 #10/#16–#22 标记为已解决，更新项目测试现状、优先级表、v1→v2 小结和推荐批次顺序，并新增完整的批次 4 实施记录；当前下一步调整为批次 5。

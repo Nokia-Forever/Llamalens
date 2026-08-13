@@ -84,7 +84,12 @@ def launch_config_from_profile(profile: Profile) -> LaunchConfig:
     )
 
 
-def build_launch_argv(db: Session, settings: AppSettings, config: LaunchConfig):
+def _build_argv_with_flags(
+    settings: AppSettings,
+    config: LaunchConfig,
+    known: set[str],
+    canonical: dict[str, str],
+):
     if config.mode == "single":
         launch_args = ["--model", config.model_path, "--alias", config.model_alias]
     else:
@@ -99,9 +104,13 @@ def build_launch_argv(db: Session, settings: AppSettings, config: LaunchConfig):
         launch_args,
         config.catalog_args,
         config.custom_args_text,
-        known_flags(db),
-        canonical_flags(db),
+        known,
+        canonical,
     )
+
+
+def build_launch_argv(db: Session, settings: AppSettings, config: LaunchConfig):
+    return _build_argv_with_flags(settings, config, known_flags(db), canonical_flags(db))
 
 
 def _apply_config(profile: Profile, payload: ProfileCreate, config: LaunchConfig) -> None:
@@ -158,9 +167,18 @@ def update_profile(db: Session, settings: AppSettings, profile: Profile, payload
     return profile
 
 
-def serialize_profile(db: Session, settings: AppSettings, profile: Profile) -> ProfileOut:
+def serialize_profile(
+    db: Session,
+    settings: AppSettings,
+    profile: Profile,
+    flags: tuple[set[str], dict[str, str]] | None = None,
+) -> ProfileOut:
     config = launch_config_from_profile(profile)
-    built = build_launch_argv(db, settings, config)
+    if flags is not None:
+        known, canonical = flags
+    else:
+        known, canonical = known_flags(db), canonical_flags(db)
+    built = _build_argv_with_flags(settings, config, known, canonical)
     return ProfileOut(
         id=profile.id,
         name=profile.name,

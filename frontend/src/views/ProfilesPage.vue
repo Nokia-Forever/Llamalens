@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { IconDeviceFloppy, IconPlus, IconRefresh, IconTrash } from '@tabler/icons-vue'
-import { api, jsonBody } from '../api'
+import { useI18n } from 'vue-i18n'
+import { profilesApi, modelsApi, argumentsApi } from '../api'
 import LaunchConfigEditor from '../components/LaunchConfigEditor.vue'
 import PageSection from '../components/PageSection.vue'
 import { useAppStore } from '../stores/app'
+import { useBusy } from '../composables/useBusy'
+import { cloneConfig } from '../utils'
 import type { CatalogArgument, LaunchConfig, ModelFile, Profile } from '../types'
 
 type ProfileForm = LaunchConfig & { name: string }
 
 const store = useAppStore()
+const { t } = useI18n()
 const profiles = ref<Profile[]>([])
 const models = ref<ModelFile[]>([])
 const catalog = ref<CatalogArgument[]>([])
 const selectedId = ref<string | null>(null)
-const saving = ref(false)
+const { run: runBusy, isBusy } = useBusy()
 
 function emptyConfig(): LaunchConfig {
   return {
@@ -22,10 +26,6 @@ function emptyConfig(): LaunchConfig {
     models_preset: '', models_max: 2, models_autoload: false, models: [], catalog_args: [],
     custom_args_text: '', labels: {},
   }
-}
-
-function cloneConfig(source: LaunchConfig): LaunchConfig {
-  return JSON.parse(JSON.stringify(source)) as LaunchConfig
 }
 
 const form = reactive<ProfileForm>({ name: '', ...emptyConfig() })
@@ -60,14 +60,19 @@ function edit(profile: Profile) {
 }
 
 function summary(profile: Profile) {
-  if (profile.mode === 'single') return `单模型 · ${profile.model_alias || '未设置 alias'}`
-  return `Router · ${profile.models.filter((item) => item.enabled).length} 个模型`
+  if (profile.mode === 'single') return t('profiles.singleSummary', { alias: profile.model_alias || t('profiles.aliasUnset') })
+  return t('profiles.routerSummary', { count: profile.models.filter((item) => item.enabled).length })
 }
 
 async function load(selectId?: string) {
-  ;[profiles.value, models.value, catalog.value] = await Promise.all([
-    api<Profile[]>('/profiles'), api<ModelFile[]>('/models'), api<CatalogArgument[]>('/arguments?limit=1000'),
+  const [profilesPage, modelsPage, catalogPage] = await Promise.all([
+    profilesApi.list(),
+    modelsApi.list(),
+    argumentsApi.list({ limit: 1000 }),
   ])
+  profiles.value = profilesPage.items
+  models.value = modelsPage.items
+  catalog.value = catalogPage
   const target = profiles.value.find((profile) => profile.id === (selectId || selectedId.value))
   if (target) edit(target)
   else if (!selectedId.value && profiles.value.length) edit(profiles.value[0])
@@ -75,41 +80,46 @@ async function load(selectId?: string) {
 }
 
 async function save() {
-  saving.value = true
-  try {
-    const saved = selectedId.value
-      ? await api<Profile>(`/profiles/${selectedId.value}`, { method: 'PUT', ...jsonBody(payload()) })
-      : await api<Profile>('/profiles', { method: 'POST', ...jsonBody(payload()) })
-    selectedId.value = saved.id
-    store.notify('success', 'Profile 模板已保存；已导入的 Service 不会被修改')
-    await load(saved.id)
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '保存失败')
-  } finally {
-    saving.value = false
-  }
+  await runBusy('profile.save', async () => {
+    try {
+      const saved = selectedId.value
+        ? await profilesApi.update(selectedId.value, payload())
+        : await profilesApi.create(payload())
+      selectedId.value = saved.id
+      store.notify('success', t('profiles.savedIndependent'))
+      await load(saved.id)
+    } catch (error) {
+      store.notify('error', error instanceof Error ? error.message : t('profiles.saveFailed'))
+    }
+  })
 }
 
 async function remove() {
-  if (!selectedId.value || !confirm('删除这个 Profile 模板？已导入 Service 的本地副本不会被删除。')) return
-  try {
-    await api(`/profiles/${selectedId.value}`, { method: 'DELETE' })
-    reset()
-    await load()
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '删除失败')
-  }
+  if (!selectedId.value || !confirm(t('profiles.deleteTemplateConfirm'))) return
+  const id = selectedId.value
+  await runBusy('profile.delete', async () => {
+    try {
+      await profilesApi.delete(id)
+      store.notify('success', t('profiles.deleted'))
+      reset()
+      await load()
+    } catch (error) {
+      store.notify('error', error instanceof Error ? error.message : t('profiles.deleteFailed'))
+    }
+  })
 }
 
 async function refreshCatalog() {
-  try {
-    const result = await api<{ ok: boolean; count: number; error: string | null }>('/arguments/refresh', { method: 'POST' })
-    if (!result.ok) throw new Error(result.error || '刷新失败')
-    catalog.value = await api<CatalogArgument[]>('/arguments?limit=1000')
-    store.notify('success', `已从 llama-server --help 读取 ${result.count} 个参数`)
-  } catch (error) {
-    store.notify('error', error instanceof Error ? error.message : '刷新参数目录失败')
-  }
+  await runBusy('profile.refreshCatalog', async () => {
+    try {
+      const result = await argumentsApi.refresh()
+      if (!result.ok) throw new Error(result.error || t('profiles.refreshFailed'))
+      catalog.value = await argumentsApi.list({ limit: 1000 })
+      store.notify('success', t('profiles.refreshSuccess', { count: result.count }))
+    } catch (error) {
+      store.notify('error', error instanceof Error ? error.message : t('profiles.refreshCatalogFailed'))
+    }
+  })
 }
 
 onMounted(() => load())
@@ -120,39 +130,39 @@ onMounted(() => load())
     <aside class="profile-list-pane">
       <div class="pane-heading">
         <strong>Profiles</strong>
-        <button class="icon-button" type="button" aria-label="新建 Profile" @click="reset"><IconPlus :size="18" /></button>
+        <button class="icon-button" type="button" :aria-label="t('profiles.newTemplate')" @click="reset"><IconPlus :size="18" /></button>
       </div>
       <button v-for="profile in profiles" :key="profile.id" class="profile-list-item" :class="{ active: selectedId === profile.id }" @click="edit(profile)">
         <span><strong>{{ profile.name }}</strong><small>{{ summary(profile) }}</small></span>
       </button>
-      <div v-if="!profiles.length" class="empty-state compact">还没有 Profile 模板。</div>
+      <div v-if="!profiles.length" class="empty-state compact">{{ t('profiles.emptyTemplates') }}</div>
     </aside>
 
     <form class="profile-editor" @submit.prevent="save">
       <div class="editor-heading">
         <div>
-          <h2>{{ selectedId ? '编辑 Profile 模板' : '新建 Profile 模板' }}</h2>
-          <p>Profile 只保存启动参数模板，不绑定 Service，也不会直接重启任何服务。</p>
+          <h2>{{ selectedId ? t('profiles.editTemplate') : t('profiles.newTemplate') }}</h2>
+          <p>{{ t('profiles.templateDescription') }}</p>
         </div>
         <div class="inline-actions">
-          <button v-if="selectedId" type="button" class="icon-button danger" aria-label="删除" @click="remove"><IconTrash :size="18" /></button>
-          <button class="button primary" :disabled="saving"><IconDeviceFloppy :size="17" />保存模板</button>
+          <button v-if="selectedId" type="button" class="icon-button danger" :aria-label="t('common.delete')" :disabled="isBusy('profile.delete')" @click="remove"><IconTrash :size="18" /></button>
+          <button class="button primary" :disabled="isBusy('profile.save')"><IconDeviceFloppy :size="17" />{{ t('profiles.saveTemplate') }}</button>
         </div>
       </div>
 
-      <PageSection title="模板信息" description="一个 Profile 可以导入到任意多个 Service；导入后各 Service 独立修改。">
-        <label class="field profile-name-field"><span>Profile 名称</span><input v-model.trim="form.name" required placeholder="例如 Qwen 32B · GPU0" /></label>
+      <PageSection :title="t('profiles.templateInfo')" :description="t('profiles.templateInfoDesc')">
+        <label class="field profile-name-field"><span>{{ t('profiles.name') }}</span><input v-model.trim="form.name" required :placeholder="t('profiles.namePlaceholder')" /></label>
       </PageSection>
 
-      <PageSection title="模型与 llama 参数">
+      <PageSection :title="t('profiles.modelAndArgs')">
         <div class="inline-actions catalog-toolbar">
-          <span class="muted-copy">参数目录供下方搜索选择。</span>
-          <button type="button" class="button secondary" @click="refreshCatalog"><IconRefresh :size="17" />刷新本机参数</button>
+          <span class="muted-copy">{{ t('profiles.catalogHint') }}</span>
+          <button type="button" class="button secondary" :disabled="isBusy('profile.refreshCatalog')" @click="refreshCatalog"><IconRefresh :size="17" />{{ t('profiles.refreshCatalog') }}</button>
         </div>
         <LaunchConfigEditor :config="form" :models="models" :catalog="catalog" />
       </PageSection>
 
-      <PageSection v-if="selected" title="上次保存的 argv" description="Service 导入模板后会使用自己的 server 路径、Host 和 Port 重新生成 argv。">
+      <PageSection v-if="selected" :title="t('profiles.savedArgv')" :description="t('profiles.savedArgvDesc')">
         <pre class="code-block compact-code">{{ selected.final_argv.join(' ') }}</pre>
         <div v-if="selected.warnings.length" class="risk-banner neutral">{{ selected.warnings.join('；') }}</div>
       </PageSection>

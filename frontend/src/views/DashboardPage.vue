@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { IconPlayerPlay, IconRefresh, IconServer } from '@tabler/icons-vue'
-import { api, jsonBody } from '../api'
+import { benchmarksApi, profilesApi, servicesApi } from '../api'
 import MetricBlock from '../components/MetricBlock.vue'
 import PageSection from '../components/PageSection.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -10,6 +11,7 @@ import { formatDate } from '../utils'
 import type { BenchmarkJob, LlamaService, Profile } from '../types'
 
 const store = useAppStore()
+const { t } = useI18n()
 const services = ref<LlamaService[]>([])
 const profiles = ref<Profile[]>([])
 const benchmarks = ref<BenchmarkJob[]>([])
@@ -19,25 +21,30 @@ const healthyCount = computed(() => services.value.filter((item) => item.status?
 const modelCount = computed(() => services.value.reduce((total, item) => total + item.applied_model_aliases.length, 0))
 
 function profileName(id: string | null) {
-  if (!id) return '本地/无来源'
-  return profiles.value.find((profile) => profile.id === id)?.name || '历史 Profile'
+  if (!id) return t('dashboard.localNoSource')
+  return profiles.value.find((profile) => profile.id === id)?.name || t('dashboard.historyProfile')
 }
 
 async function load() {
   loading.value = true
   try {
-    ;[services.value, benchmarks.value, profiles.value] = await Promise.all([
-      api<LlamaService[]>('/services?with_status=true'), api<BenchmarkJob[]>('/benchmarks'), api<Profile[]>('/profiles'),
+    const [servicesData, benchmarksPage, profilesPage] = await Promise.all([
+      servicesApi.list({ with_status: true }),
+      benchmarksApi.list({ limit: 10 }),
+      profilesApi.list({ limit: 200 }),
     ])
-  } catch (error) { store.notify('error', error instanceof Error ? error.message : '加载概览失败') }
+    services.value = servicesData
+    benchmarks.value = benchmarksPage.items
+    profiles.value = profilesPage.items
+  } catch (error) { store.notify('error', error instanceof Error ? error.message : t('dashboard.loadFailed')) }
   finally { loading.value = false }
 }
 
 async function action(service: LlamaService, value: 'start' | 'restart') {
   actingId.value = service.id
   try {
-    const result = await api<{ ok: boolean; stderr: string }>(`/services/${service.id}/action`, { method: 'POST', ...jsonBody({ action: value }) })
-    store.notify(result.ok ? 'success' : 'error', result.ok ? '命令执行完成' : result.stderr || '命令执行失败')
+    const result = await servicesApi.action(service.id, value)
+    store.notify(result.ok ? 'success' : 'error', result.ok ? t('dashboard.commandDone') : result.stderr || t('dashboard.commandFailed'))
     await load()
   } finally { actingId.value = null }
 }
@@ -55,33 +62,33 @@ onMounted(load)
       <MetricBlock label="Recent tests" :value="String(Math.min(benchmarks.length, 5))" />
     </div>
 
-    <PageSection title="Llama Services" description="每个服务拥有独立 unit、端口和已应用启动快照；Profile 只作为可复制模板。">
+    <PageSection title="Llama Services" :description="t('dashboard.servicesDesc')">
       <div v-if="!services.length" class="empty-state">
-        还没有服务。<RouterLink to="/services">创建第一个 Llama Service</RouterLink>
+        {{ t('dashboard.noServices') }}<RouterLink to="/services">{{ t('dashboard.createFirstService') }}</RouterLink>
       </div>
       <div v-else class="service-card-grid">
         <article v-for="service in services" :key="service.id" class="service-hero service-card">
           <div>
             <span class="service-kicker"><IconServer :size="17" /> {{ service.unit_name }}</span>
             <h2>{{ service.name }}</h2>
-            <p>{{ service.host }}:{{ service.port }} · {{ service.applied_launch_config?.mode || '未部署' }} · {{ service.applied_model_aliases.join(', ') || '无 applied alias' }}</p>
-            <small class="service-profile-source">已应用来源：{{ profileName(service.applied_source_profile_id) }}</small>
+            <p>{{ service.host }}:{{ service.port }} · {{ service.applied_launch_config?.mode || t('dashboard.notDeployed') }} · {{ service.applied_model_aliases.join(', ') || t('dashboard.noAppliedAlias') }}</p>
+            <small class="service-profile-source">{{ t('dashboard.appliedSource') }}：{{ profileName(service.applied_source_profile_id) }}</small>
           </div>
           <div class="service-controls">
             <StatusBadge :status="service.status?.ok ? 'healthy' : 'inactive'" />
-            <StatusBadge v-if="service.has_pending_changes" status="pending" label="有未部署修改" />
-            <button class="button secondary" :disabled="actingId === service.id" @click="action(service, 'start')"><IconPlayerPlay :size="17" />启动</button>
-            <button class="button primary" :disabled="actingId === service.id" @click="action(service, 'restart')"><IconRefresh :size="17" />重启</button>
+            <StatusBadge v-if="service.has_pending_changes" status="pending" :label="t('dashboard.pendingChanges')" />
+            <button class="button secondary" :disabled="actingId === service.id" @click="action(service, 'start')"><IconPlayerPlay :size="17" />{{ t('services.start') }}</button>
+            <button class="button primary" :disabled="actingId === service.id" @click="action(service, 'restart')"><IconRefresh :size="17" />{{ t('services.restart') }}</button>
           </div>
         </article>
       </div>
     </PageSection>
 
-    <PageSection title="最近 Benchmark">
-      <div v-if="!benchmarks.length" class="empty-state">还没有测试记录。</div>
+    <PageSection :title="t('dashboard.recentBenchmarks')">
+      <div v-if="!benchmarks.length" class="empty-state">{{ t('dashboard.noBenchmarkRecords') }}</div>
       <div v-else class="compact-list">
         <RouterLink v-for="job in benchmarks.slice(0, 5)" :key="job.id" to="/results" class="compact-row">
-          <div><strong>{{ job.name }}</strong><span>{{ job.model_alias || '未指定模型' }} · {{ formatDate(job.created_at) }}</span></div>
+          <div><strong>{{ job.name }}</strong><span>{{ job.model_alias || t('dashboard.noModelSpecified') }} · {{ formatDate(job.created_at) }}</span></div>
           <StatusBadge :status="job.status" />
         </RouterLink>
       </div>

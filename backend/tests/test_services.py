@@ -178,3 +178,47 @@ def test_archive_and_restore(client, monkeypatch, tmp_path):
     assert (tmp_path / "data" / "archive" / "services" / service["id"] / "llamalens-qwen.service").is_file()
     assert client.post(f"/api/v1/services/{service['id']}/restore").status_code == 200
     assert (tmp_path / "systemd" / "llamalens-qwen.service").is_file()
+
+
+def test_list_services_with_status_batches_systemctl(client, monkeypatch, tmp_path):
+    import json as _json
+    from app.services import systemd
+
+    model = configure_models(client, tmp_path)
+    profile = create_profile(client, model)
+    monkeypatch.setenv("LLAMALENS_SYSTEMD_DIR", str(tmp_path / "systemd"))
+    monkeypatch.setattr("app.services.llama_services.daemon_reload", lambda: CommandResult(True, ["systemctl", "daemon-reload"], 0, "", ""))
+    monkeypatch.setattr("app.services.llama_services.run_unit_action", lambda unit_name, action, timeout=30: CommandResult(True, ["systemctl", action, unit_name], 0, "", ""))
+    first = client.post("/api/v1/services", json=service_payload()).json()
+    second = client.post("/api/v1/services", json=service_payload("Second", "llamalens-second.service", 8089)).json()
+    import_profile(client, first["id"], profile["id"])
+    import_profile(client, second["id"], profile["id"])
+    client.post(f"/api/v1/services/{first['id']}/deploy")
+    client.post(f"/api/v1/services/{second['id']}/deploy")
+
+    run_calls: list[list[str]] = []
+
+    class FakeCompleted:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(argv, **kwargs):
+        run_calls.append(list(argv))
+        if "list-units" in argv:
+            units = [
+                {"unit": "llamalens-qwen.service", "active": "active", "sub": "running", "description": "Qwen"},
+                {"unit": "llamalens-second.service", "active": "inactive", "sub": "dead", "description": "Second"},
+            ]
+            return FakeCompleted(0, _json.dumps(units), "")
+        return FakeCompleted(0, "", "")
+
+    monkeypatch.setattr(systemd.subprocess, "run", fake_run)
+
+    body = client.get("/api/v1/services?with_status=true").json()
+    list_units_calls = [c for c in run_calls if "list-units" in c]
+    assert len(list_units_calls) == 1
+    by_id = {s["id"]: s for s in body}
+    assert by_id[first["id"]]["status"]["ok"] is True
+    assert by_id[second["id"]]["status"]["ok"] is False

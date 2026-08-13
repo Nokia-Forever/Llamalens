@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { BenchmarkJob } from '../../types'
 import { formatDate } from '../../utils'
 import { formatMetric, getMetricStat, STAT_LABELS, targetName, type MetricConfig, type StatKey } from '../../metricsStats'
@@ -8,6 +9,7 @@ const props = defineProps<{
   jobs: BenchmarkJob[]
   metrics: MetricConfig[]
 }>()
+const { t } = useI18n()
 
 const STAT_KEYS: StatKey[] = ['average', 'median', 'p10', 'p90', 'min', 'max']
 
@@ -41,8 +43,8 @@ function cellClass(value: number | null): string {
     <table class="data-table stat-table">
       <thead>
         <tr>
-          <th rowspan="2">测试</th>
-          <th rowspan="2">目标</th>
+          <th rowspan="2">{{ t('observation.test') }}</th>
+          <th rowspan="2">{{ t('observation.target') }}</th>
           <th v-for="metric in metrics" :key="metric.key" colspan="6">{{ metric.label }} ({{ metric.unit }})</th>
         </tr>
         <tr>

@@ -4,6 +4,7 @@ import { DataZoomComponent, GridComponent, LegendComponent, TooltipComponent } f
 import { init, use, type EChartsType } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { BenchmarkJob } from '../../types'
 import { formatMetric, getMetricStat, type MetricConfig, type StatKey } from '../../metricsStats'
 import { buildAxisPlan } from './chartAxis'
@@ -25,6 +26,7 @@ const props = defineProps<{
   groupMode?: boolean
   groups?: TrendGroup[]
 }>()
+const { t } = useI18n()
 const element = ref<HTMLDivElement | null>(null)
 let chart: EChartsType | null = null
 
@@ -70,7 +72,7 @@ function drawGrouped() {
         trigger: 'axis',
         formatter: (params: Array<{ dataIndex: number; seriesName: string; value: unknown; data?: { jobName?: string }; marker: string }>) => {
           const index = params[0]?.dataIndex ?? 0
-          const lines = [`序号 ${index + 1}`]
+          const lines = [t('observation.chartIndex', { index: index + 1 })]
           for (const param of params) {
             const value = Array.isArray(param.value) ? param.value[0] : param.value
             if (value == null) continue
@@ -85,7 +87,7 @@ function drawGrouped() {
       xAxis: {
         type: 'category',
         data: Array.from({ length: maxLen }, (_, index) => String(index + 1)),
-        name: '组内序号',
+        name: t('observation.groupIndex'),
         axisLabel: { color: '#7c858f' },
         axisLine: { lineStyle: { color: '#374151' } },
       },
