@@ -1,5 +1,7 @@
 # LlamaLens
 
+> 本项目是运行在 llama.cpp 推理机本机的实验性 MVP。它能管理本机 `llama-server` systemd service，并记录可复现的 Benchmark 结果；不提供多租户、TLS 或完整的账号权限系统。
+
 LlamaLens 是一个部署在 llama.cpp 推理机本机的轻量 Web 控制台。它可以创建和管理多个 `llama-server` systemd service，把模型和启动参数保存为可复用 Profile 模板，再复制到具体 Service 后显式部署，并用独立 Benchmark 请求测量：
 
 - TTFT：请求开始到第一个实际内容 token 到达的时间。
@@ -8,6 +10,13 @@ LlamaLens 是一个部署在 llama.cpp 推理机本机的轻量 Web 控制台。
 - Client Decode tok/s：按首个和最后一个内容 token 的客户端时间戳计算，用于核对服务端指标。
 
 前端使用 Vue 3，后端使用 FastAPI、SQLAlchemy 和 SQLite。当前 MVP 假设 LlamaLens 以 root 运行，能够写入 `/etc/systemd/system` 并直接调用 `systemctl`；默认仍只监听本机地址。
+
+## 仓库状态
+
+- 适用环境：Linux + systemd + llama.cpp；Windows 主要用于前端开发、后端单元测试和 mock 验证。
+- 数据库默认是 SQLite，模型文件不会随仓库发布。
+- 远程访问前必须配置认证和反向代理；不要把未认证的管理端口直接暴露到公网。
+- 发布前检查项见 [GitHub 发布检查清单](docs/github-publish-checklist.md)。
 
 ## 当前能力
 
@@ -58,6 +67,18 @@ npm run dev
 ```
 
 Vite 会把 `/api` 代理到 `127.0.0.1:8000`。
+
+### 认证和环境变量
+
+复制 `.env.example` 为 `.env` 后按需修改。最重要的变量是：
+
+- `LLAMALENS_DATA_DIR`：SQLite、任务记录和服务配置的持久化目录。
+- `LLAMALENS_FRONTEND_DIST`：后端托管的前端 `dist` 目录。
+- `LLAMALENS_CORS_ORIGINS`：开发服务器允许的来源列表。
+- `LLAMALENS_API_TOKEN`：启动时写入数据库的 API token；不要提交真实值。
+- `LLAMALENS_REQUIRE_AUTH=1`：即使从 loopback 访问也强制登录。
+
+完整变量和默认值见 [.env.example](.env.example)。启用 token 后，前端登录页使用同一个 token；SSE 连接会通过查询参数携带认证信息。
 
 ## Linux 部署
 
@@ -125,7 +146,24 @@ cd frontend && npm run build
 
 Windows PowerShell 使用 `.venv\Scripts\python.exe` 和 `npm.cmd`。
 
+## 项目结构
+
+```text
+backend/   FastAPI API、SQLite 数据模型、任务队列和 llama.cpp 适配层
+frontend/  Vue 3 + TypeScript + Vite 管理界面
+deploy/    systemd 和 sudoers 示例文件
+docs/      实现设计、参数参考、优化记录和发布检查清单
+```
+
+## 贡献和安全
+
+- 贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 安全边界和漏洞报告见 [SECURITY.md](SECURITY.md)。
+- 当前仓库按 Apache License 2.0 发布；请在合并前确认 `LICENSE` 中的版权主体符合实际权利人。
+
 ## 参考文档
 
 - [实现设计](docs/implementation-design.md)
 - [llama.cpp systemd 与 llama-server 参数参考](docs/llama-cpp-systemd-service-parameters.md)
+- [Linux 部署说明](llamalens部署.md)
+- [GitHub 发布检查清单](docs/github-publish-checklist.md)
