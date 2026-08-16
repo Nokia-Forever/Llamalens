@@ -1,9 +1,0 @@
-fastapi<1,>=0.116
-uvicorn[standard]<1,>=0.35
-sqlalchemy<3,>=2.0
-pydantic<3,>=2.11
-httpx<1,>=0.28
-python-multipart<1,>=0.0.20
-
-[test]
-pytest<9,>=8.4
